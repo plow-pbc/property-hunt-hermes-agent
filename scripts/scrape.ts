@@ -8,7 +8,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createRequire } from 'node:module';
 
-import { extractScraped } from './extract.ts';
+import { extractScraped, geocodeQuery } from './extract.ts';
 import type { PageSurfaces } from './extract.ts';
 import { slugify } from './store.ts';
 import type { Scraped } from './store.ts';
@@ -78,7 +78,7 @@ async function scrapeRendered(browser: any, url: string): Promise<ReturnType<typ
 
 /** Keyless, same OpenStreetMap ecosystem the map tiles come from. */
 async function geocode(scraped: Scraped): Promise<{ lat: number; lng: number } | null> {
-  const query = [scraped.address, scraped.city, scraped.state, scraped.zip].filter(Boolean).join(', ');
+  const query = geocodeQuery(scraped);
   const response = await fetch(`${NOMINATIM}?q=${encodeURIComponent(query)}&format=json&limit=1`, {
     headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' },
   });

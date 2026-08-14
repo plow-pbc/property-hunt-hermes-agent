@@ -8,6 +8,7 @@ import {
   flattenJsonLd,
   parseAddressLine,
   parseDescription,
+  geocodeQuery,
   toNumber,
 } from './extract.ts';
 import type { PageSurfaces } from './extract.ts';
@@ -93,6 +94,29 @@ test('the generated blurb yields the facts even when json-ld is thin', () => {
         'at $3,250,000. This is a 3-bed, 3-bath, 2,315 sqft property.',
     ),
     { price: 3250000, beds: 3, baths: 3, sqft: 2315 },
+  );
+});
+
+test('a condo geocodes by its building, keeping the unit in the address', () => {
+  // Observed live: Nominatim returns nothing for "1501 Greenwich St, Unit 101"
+  // but resolves the building fine, which is the right pin either way.
+  const sf = { city: 'San Francisco', state: 'CA', zip: '94123' };
+  const expected = '1501 Greenwich St, San Francisco, CA, 94123';
+  for (const address of [
+    '1501 Greenwich St, Unit 101',
+    '1501 Greenwich St Unit 101',
+    '1501 Greenwich St #101',
+    '1501 Greenwich St, Apt 101',
+    '1501 Greenwich St, Ste 101',
+  ]) {
+    assert.equal(geocodeQuery({ ...sf, address }), expected, `${address} should geocode by building`);
+  }
+});
+
+test('a plain street address is passed to the geocoder untouched', () => {
+  assert.equal(
+    geocodeQuery({ address: '424 28th St', city: 'San Francisco', state: 'CA', zip: '94131' }),
+    '424 28th St, San Francisco, CA, 94131',
   );
 });
 

@@ -110,6 +110,30 @@ export function parseDescription(description: string): {
   };
 }
 
+/**
+ * The address as a geocoder wants it. Unit designators have to come off: a
+ * geocoder resolves buildings, not apartments, and "1501 Greenwich St, Unit
+ * 101" returns nothing while "1501 Greenwich St" resolves fine. The building's
+ * coordinates are what a map pin wants anyway.
+ *
+ * The unit stays in `scraped.address` — it is part of the identity of the home
+ * and part of the dedup key. Only the geocoder query drops it.
+ */
+export function geocodeQuery(parts: {
+  address: string;
+  city: string;
+  state: string;
+  zip: string;
+}): string {
+  const street = parts.address
+    // "#" is not a word character, so it needs its own branch — \b never
+    // matches between a space and a "#".
+    .replace(/,?\s*(?:\b(?:unit|apt|apartment|ste|suite|no\.?)\b\s*[\w-]+|#\s*[\w-]+)\s*$/i, '')
+    .replace(/,\s*$/, '')
+    .trim();
+  return [street || parts.address, parts.city, parts.state, parts.zip].filter(Boolean).join(', ');
+}
+
 function statusFrom(availability: unknown): string | null {
   if (typeof availability !== 'string') return null;
   const tail = availability.split('/').pop() ?? availability;

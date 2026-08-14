@@ -129,7 +129,8 @@ function main(argv: string[]): void {
       } else if (rows.length === 0) {
         process.stdout.write('no properties yet\n');
       } else {
-        process.stdout.write(`${rows.map(summarize).join('\n\n')}\n\n${rows.length} properties\n`);
+        const label = rows.length === 1 ? 'property' : 'properties';
+        process.stdout.write(`${rows.map(summarize).join('\n\n')}\n\n${rows.length} ${label}\n`);
       }
       return;
     }
