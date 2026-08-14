@@ -12,7 +12,7 @@ import {
   toNumber,
 } from './extract.ts';
 import type { PageSurfaces } from './extract.ts';
-import { slugify } from './store.ts';
+import { coerceScraped, slugify } from './store.ts';
 
 // Captured from a live Compass detail page on 2026-08-14, trimmed to the only
 // surfaces the parser reads.
@@ -50,6 +50,26 @@ test('a listing with no usable address fails loudly instead of saving a blank ho
     () => extractScraped({ url: 'https://example.com/x', jsonld: [], og: {} }),
     /could not find an address/,
   );
+});
+
+test('a listing that cannot be keyed is rejected by the same rules that save it', () => {
+  // extract is lenient — it reports what the page had. scrape.ts runs the
+  // result through coerceScraped before geocoding or downloading anything, so
+  // an unsaveable listing fails immediately instead of after the expensive
+  // work, leaving an orphaned photo behind.
+  const { scraped } = extractScraped({
+    url: 'https://example.com/y',
+    jsonld: [
+      {
+        '@type': 'SingleFamilyResidence',
+        url: 'https://example.com/y',
+        address: { '@type': 'PostalAddress', streetAddress: '12 Elm St', addressLocality: 'Springfield' },
+      },
+    ],
+    og: { 'og:title': '12 Elm St — For Sale' },
+  });
+  assert.equal(scraped.zip, '', 'the page genuinely had no zip');
+  assert.throws(() => coerceScraped(scraped), /required.*dedup key/s);
 });
 
 // --- The pieces, so a failure points at which surface changed ---------------

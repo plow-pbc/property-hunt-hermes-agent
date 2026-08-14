@@ -10,7 +10,7 @@ import { createRequire } from 'node:module';
 
 import { extractScraped, geocodeQuery } from './extract.ts';
 import type { PageSurfaces } from './extract.ts';
-import { slugify } from './store.ts';
+import { coerceScraped, slugify } from './store.ts';
 import type { Scraped } from './store.ts';
 import { resolveDataDir } from './properties.ts';
 
@@ -123,7 +123,13 @@ async function main(): Promise<void> {
     throw err;
   }
 
-  const { scraped, photoUrl } = await scrapeRendered(browser, url);
+  const { scraped: parsed, photoUrl } = await scrapeRendered(browser, url);
+
+  // Validate with the exact rules `upsert` applies, before spending anything.
+  // A record that cannot be saved must fail here — otherwise we geocode it,
+  // download its photo, print it, and only then have upsert reject it, leaving
+  // an orphaned image named after a slug no row will ever carry.
+  const scraped = coerceScraped(parsed);
   const id = slugify(scraped);
   const dir = resolveDataDir();
 
