@@ -177,6 +177,63 @@ export function setMine(rows: Property[], id: string, field: string, value: stri
   return next;
 }
 
+/**
+ * Validate and normalize agent-supplied JSON into a Scraped record. The agent
+ * writes this by hand, so every field is checked here rather than trusted —
+ * a bad address would silently create a duplicate house under a wrong slug.
+ */
+export function coerceScraped(input: unknown): Scraped {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+    throw new Error('scraped payload must be a JSON object');
+  }
+  const raw = input as Record<string, unknown>;
+
+  for (const key of ['address', 'city', 'state'] as const) {
+    if (typeof raw[key] !== 'string' || (raw[key] as string).trim() === '') {
+      throw new Error(`scraped.${key} is required and must be a non-empty string — it forms the dedup key`);
+    }
+  }
+  if (typeof raw.listing_url !== 'string' || !/^https?:\/\//i.test(raw.listing_url)) {
+    throw new Error('scraped.listing_url is required and must be an http(s) URL');
+  }
+  const listingUrl = raw.listing_url;
+
+  const asNumber = (key: string): number | null => {
+    const value = raw[key];
+    if (value === undefined || value === null || value === '') return null;
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+      throw new Error(`scraped.${key} must be a number or null, got ${JSON.stringify(value)}`);
+    }
+    return parsed;
+  };
+  const asText = (key: string): string | null => {
+    const value = raw[key];
+    if (value === undefined || value === null || value === '') return null;
+    return String(value);
+  };
+
+  return {
+    address: (raw.address as string).trim(),
+    city: (raw.city as string).trim(),
+    state: (raw.state as string).trim(),
+    zip: typeof raw.zip === 'string' ? raw.zip.trim() : '',
+    lat: asNumber('lat'),
+    lng: asNumber('lng'),
+    price: asNumber('price'),
+    beds: asNumber('beds'),
+    baths: asNumber('baths'),
+    sqft: asNumber('sqft'),
+    property_type: asText('property_type'),
+    listing_status: asText('listing_status'),
+    listing_url: listingUrl,
+    // Any host is supported; the source label just falls out of the URL.
+    listing_source: asText('listing_source') ?? new URL(listingUrl).hostname.replace(/^www\./, ''),
+    photo: asText('photo'),
+    last_scraped_at: asText('last_scraped_at') ?? new Date().toISOString(),
+  };
+}
+
 export function removeProperty(rows: Property[], id: string): Property[] {
   if (!rows.some((row) => row.id === id)) {
     throw new Error(`no property with id ${JSON.stringify(id)}`);

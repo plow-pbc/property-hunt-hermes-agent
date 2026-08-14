@@ -13,6 +13,8 @@ import {
   upsertScraped,
   setMine,
   emptyStoreText,
+  coerceScraped,
+  removeProperty,
 } from './store.ts';
 import type { Scraped } from './store.ts';
 
@@ -157,6 +159,36 @@ test('a corrupt store throws instead of silently becoming an empty one', () => {
   }
 });
 
+// --- Agent-supplied input ---------------------------------------------------
+
+test('a listing from any site is accepted and labeled by its host', () => {
+  for (const [url, expected] of [
+    ['https://www.compass.com/homedetails/x/1_pid/', 'compass.com'],
+    ['https://www.zillow.com/homedetails/x/1_zpid/', 'zillow.com'],
+    ['https://redfin.com/CA/SF/x', 'redfin.com'],
+  ] as const) {
+    const out = coerceScraped({ address: '1 A St', city: 'SF', state: 'CA', listing_url: url });
+    assert.equal(out.listing_source, expected);
+  }
+});
+
+test('missing optional fields become null rather than undefined', () => {
+  const out = coerceScraped({ address: '1 A St', city: 'SF', state: 'CA', listing_url: 'https://x.com/y' });
+  for (const key of ['lat', 'lng', 'price', 'beds', 'baths', 'sqft', 'photo'] as const) {
+    assert.equal(out[key], null, `${key} must be null so JSON.stringify keeps it visible`);
+  }
+  assert.ok(out.last_scraped_at, 'a scrape timestamp is stamped even when the caller omits it');
+});
+
+test('input that would corrupt the dedup key is rejected', () => {
+  const base = { address: '1 A St', city: 'SF', state: 'CA', listing_url: 'https://x.com/y' };
+  assert.throws(() => coerceScraped({ ...base, address: '' }), /address is required/);
+  assert.throws(() => coerceScraped({ ...base, city: undefined }), /city is required/);
+  assert.throws(() => coerceScraped({ ...base, listing_url: 'not-a-url' }), /listing_url/);
+  assert.throws(() => coerceScraped({ ...base, price: 'a lot' }), /price must be a number/);
+  assert.throws(() => coerceScraped('nope'), /must be a JSON object/);
+});
+
 // --- Durability -------------------------------------------------------------
 
 test('a write survives a round trip through the filesystem', () => {
@@ -165,6 +197,12 @@ test('a write survives a round trip through the filesystem', () => {
   const rows = upsertScraped(readStore(dir), scraped());
   writeStore(dir, rows);
   assert.deepEqual(readStore(dir), rows);
+});
+
+test('removing a property that is not there fails loudly', () => {
+  const rows = upsertScraped([], scraped());
+  assert.throws(() => removeProperty(rows, 'no-such-house'), /no property with id/);
+  assert.deepEqual(removeProperty(rows, rows[0].id), []);
 });
 
 test('a write leaves no scratch files behind', () => {
