@@ -70,9 +70,19 @@ function normalizeWords(value: string): string {
     .join('-');
 }
 
-/** The dedup key. Same house written any reasonable way → same slug. */
-export function slugify(address: string, city: string, state: string): string {
-  return [address, city, state].map(normalizeWords).filter(Boolean).join('-');
+/**
+ * The dedup key. Same house written any reasonable way → same slug.
+ *
+ * Keyed on zip rather than city because listing sites disagree about what
+ * "city" means: Compass's detail page reports `addressLocality` as the
+ * *neighborhood* ("Noe Valley") while its search page reports the city ("San
+ * Francisco"). Keying on city would file one house twice depending on which
+ * page it was scraped from. Zip is the same on both, and already implies city.
+ * City is only the fallback for a listing with no zip.
+ */
+export function slugify(parts: { address: string; city: string; state: string; zip?: string }): string {
+  const locality = parts.zip && parts.zip.trim() !== '' ? parts.zip : parts.city;
+  return [parts.address, locality, parts.state].map(normalizeWords).filter(Boolean).join('-');
 }
 
 export function emptyStoreText(): string {
@@ -132,7 +142,7 @@ export function upsertScraped(
   scraped: Scraped,
   now: string = new Date().toISOString(),
 ): Property[] {
-  const id = slugify(scraped.address, scraped.city, scraped.state);
+  const id = slugify(scraped);
   const index = rows.findIndex((row) => row.id === id);
   if (index === -1) {
     return [...rows, { id, scraped, mine: { rating: null, status: 'new', notes: '', added_at: now } }];

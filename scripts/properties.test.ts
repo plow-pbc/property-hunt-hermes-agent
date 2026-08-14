@@ -63,7 +63,7 @@ test('init never destroys properties already collected', () => {
   const dir = tmpdir();
   run(dir, 'init');
   run(dir, 'upsert', '--scraped', JSON.stringify(LISTING));
-  run(dir, 'set', '424-28th-st-san-francisco-ca', 'notes', 'keep me');
+  run(dir, 'set', '424-28th-st-94131-ca', 'notes', 'keep me');
 
   run(dir, 'init'); // e.g. after a skill upgrade
 
@@ -78,7 +78,7 @@ test('the add-then-annotate-then-refresh flow a user actually does', () => {
 
   assert.match(run(dir, 'upsert', '--scraped', JSON.stringify(LISTING)), /^added /);
 
-  const id = '424-28th-st-san-francisco-ca';
+  const id = '424-28th-st-94131-ca';
   run(dir, 'set', id, 'rating', '4');
   run(dir, 'set', id, 'notes', 'sweeping views, needs a new roof');
   run(dir, 'set', id, 'status', 'toured');
@@ -101,7 +101,7 @@ test('multi-word notes survive the shell without quoting gymnastics', () => {
   const dir = tmpdir();
   run(dir, 'init');
   run(dir, 'upsert', '--scraped', JSON.stringify(LISTING));
-  run(dir, 'set', '424-28th-st-san-francisco-ca', 'notes', 'needs', 'a', 'new', 'roof');
+  run(dir, 'set', '424-28th-st-94131-ca', 'notes', 'needs', 'a', 'new', 'roof');
   const [row] = JSON.parse(run(dir, 'list', '--json'));
   assert.equal(row.mine.notes, 'needs a new roof');
 });
@@ -117,7 +117,7 @@ test('rm deletes the property and its photo', () => {
   run(dir, 'upsert', '--scraped', JSON.stringify({ ...LISTING, photo: 'photos/x.jpg' }));
   fs.writeFileSync(path.join(dir, 'photos', 'x.jpg'), 'jpegbytes');
 
-  run(dir, 'rm', '424-28th-st-san-francisco-ca');
+  run(dir, 'rm', '424-28th-st-94131-ca');
 
   assert.deepEqual(JSON.parse(run(dir, 'list', '--json')), []);
   assert.equal(fs.existsSync(path.join(dir, 'photos', 'x.jpg')), false, 'the photo is orphaned otherwise');
@@ -127,5 +127,5 @@ test('an unknown id lists the ids that do exist', () => {
   const dir = tmpdir();
   run(dir, 'init');
   run(dir, 'upsert', '--scraped', JSON.stringify(LISTING));
-  assert.throws(() => run(dir, 'get', 'wrong-house'), /424-28th-st-san-francisco-ca/);
+  assert.throws(() => run(dir, 'get', 'wrong-house'), /424-28th-st-94131-ca/);
 });

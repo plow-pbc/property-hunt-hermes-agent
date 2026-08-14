@@ -101,27 +101,46 @@ test('rating only accepts 1-5', () => {
 // --- Dedup ------------------------------------------------------------------
 
 test('the same house written different ways is the same house', () => {
-  const canonical = slugify('424 28th Street', 'San Francisco', 'CA');
+  const canonical = slugify({ address: '424 28th Street', city: 'San Francisco', state: 'CA', zip: '94131' });
   for (const variant of ['424 28th St', '424 28th st.', '424  28TH  STREET', '424 28th Street,']) {
-    assert.equal(slugify(variant, 'san francisco', 'ca'), canonical, `${variant} should collapse`);
+    assert.equal(
+      slugify({ address: variant, city: 'san francisco', state: 'ca', zip: '94131' }),
+      canonical,
+      `${variant} should collapse`,
+    );
   }
 });
 
-test('different houses do not collide', () => {
-  assert.notEqual(
-    slugify('424 28th St', 'San Francisco', 'CA'),
-    slugify('424 28th Ave', 'San Francisco', 'CA'),
+test('a neighborhood and its city are the same house', () => {
+  // Compass reports addressLocality as the neighborhood on a detail page and
+  // the city on a search page. Keying on zip is what keeps those one record.
+  assert.equal(
+    slugify({ address: '424 28th St', city: 'Noe Valley', state: 'CA', zip: '94131' }),
+    slugify({ address: '424 28th St', city: 'San Francisco', state: 'CA', zip: '94131' }),
   );
+});
+
+test('different houses do not collide', () => {
+  const sf = { city: 'San Francisco', state: 'CA', zip: '94131' };
+  assert.notEqual(slugify({ ...sf, address: '424 28th St' }), slugify({ ...sf, address: '424 28th Ave' }));
   assert.notEqual(
-    slugify('424 28th St', 'San Francisco', 'CA'),
-    slugify('424 28th St', 'Oakland', 'CA'),
+    slugify({ address: '424 28th St', city: 'San Francisco', state: 'CA', zip: '94131' }),
+    slugify({ address: '424 28th St', city: 'Oakland', state: 'CA', zip: '94609' }),
+  );
+});
+
+test('a listing with no zip still gets a usable key', () => {
+  assert.equal(
+    slugify({ address: '424 28th St', city: 'San Francisco', state: 'CA', zip: '' }),
+    '424-28th-st-san-francisco-ca',
   );
 });
 
 test('a unit number distinguishes two homes at one street address', () => {
+  const at = { city: 'San Francisco', state: 'CA', zip: '94123' };
   assert.notEqual(
-    slugify('1501 Greenwich Street, Unit 101', 'San Francisco', 'CA'),
-    slugify('1501 Greenwich Street, Unit 202', 'San Francisco', 'CA'),
+    slugify({ ...at, address: '1501 Greenwich Street, Unit 101' }),
+    slugify({ ...at, address: '1501 Greenwich Street, Unit 202' }),
   );
 });
 
