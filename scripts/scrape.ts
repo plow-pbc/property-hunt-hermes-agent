@@ -7,6 +7,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 
 import { extractScraped, geocodeQuery } from './extract.ts';
 import type { PageSurfaces } from './extract.ts';
@@ -68,9 +69,13 @@ async function harvest(browser: any, url: string): Promise<PageSurfaces> {
  * produced a saveable record — the retry mechanism has to be able to see the
  * failure it exists to ride out.
  */
-async function scrapeRendered(browser: any, url: string): Promise<{ scraped: Scraped; photoUrl: string | null }> {
+export async function scrapeRendered(
+  browser: any,
+  url: string,
+  timeoutMs: number = RENDER_TIMEOUT_MS,
+): Promise<{ scraped: Scraped; photoUrl: string | null }> {
   await browser.goto(url);
-  const deadline = Date.now() + RENDER_TIMEOUT_MS;
+  const deadline = Date.now() + timeoutMs;
   let lastError = 'page never rendered a listing';
   while (Date.now() < deadline) {
     try {
@@ -84,10 +89,19 @@ async function scrapeRendered(browser: any, url: string): Promise<{ scraped: Scr
       await sleep(POLL_INTERVAL_MS);
     }
   }
+  // Everything the loop swallows lands here — a thin page, but also a bot
+  // wall, a page crash, or a browser that went away mid-run. Only offer the
+  // "try another site" remedy when the page actually rendered and simply
+  // lacked a field; prescribing it for a browser failure sends the agent off
+  // after the wrong problem.
+  const missingField = /is required|could not find an address|no usable characters/.test(lastError);
   throw new Error(
-    `could not read a saveable listing from ${url} after ${RENDER_TIMEOUT_MS / 1000}s. ` +
-      `Last problem: ${lastError}. If the page genuinely does not publish that field, ` +
-      'try this property on another listing site — do not supply a value of your own.',
+    `could not read a saveable listing from ${url} after ${timeoutMs / 1000}s. ` +
+      `Last problem: ${lastError}.` +
+      (missingField
+        ? ' If the page genuinely does not publish that field, try this property on another' +
+          ' listing site — do not supply a value of your own.'
+        : ''),
   );
 }
 
@@ -167,14 +181,17 @@ async function main(): Promise<void> {
   process.stdout.write(`${JSON.stringify(scraped, null, 2)}\n`);
 }
 
-main().catch((err) => {
-  const name = (err as Error & { name?: string })?.name ?? 'Error';
-  const detail = String((err as Error)?.message ?? err);
-  toolError(
-    name === 'BrowserNotConnected'
-      ? 'browser unavailable: service unreachable (it may be restarting — retry once after 60s)'
-      : detail.startsWith(`${name}:`)
-        ? detail
-        : `${name}: ${detail}`,
-  );
-});
+// Only run when invoked directly, so tests can import scrapeRendered.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((err) => {
+    const name = (err as Error & { name?: string })?.name ?? 'Error';
+    const detail = String((err as Error)?.message ?? err);
+    toolError(
+      name === 'BrowserNotConnected'
+        ? 'browser unavailable: service unreachable (it may be restarting — retry once after 60s)'
+        : detail.startsWith(`${name}:`)
+          ? detail
+          : `${name}: ${detail}`,
+    );
+  });
+}
