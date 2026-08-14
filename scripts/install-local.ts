@@ -7,7 +7,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const SLUG = 'property-hunt';
@@ -30,9 +30,10 @@ function resolvePlowdPort(): number {
     if (Number.isInteger(port) && port > 0) return port;
   }
 
-  const pid = execFileSync('pgrep', ['-f', 'python3 -m uvicorn plowd\\.main'], { encoding: 'utf8' })
-    .split('\n')
-    .filter(Boolean)[0];
+  // pgrep exits 1 when nothing matches, which execFileSync turns into a throw —
+  // so without this the intended "start Plow.app" message never surfaces.
+  const found = spawnSync('pgrep', ['-f', 'python3 -m uvicorn plowd\\.main'], { encoding: 'utf8' });
+  const pid = (found.stdout ?? '').split('\n').filter(Boolean)[0];
   if (!pid) throw new Error(`plowd is not running for '${BUNDLE_ID}' — start Plow.app first`);
 
   const listening = execFileSync('lsof', ['-nP', '-iTCP', '-sTCP:LISTEN', '-a', '-p', pid], {

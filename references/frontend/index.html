@@ -72,7 +72,7 @@
   .notice.error { color: #b4574d; }
 
   /* --- Map pins: photo + price + beds, per the "what house is where" ask --- */
-  .pin { width: 96px; margin-left: -48px; margin-top: -58px; text-align: center; cursor: pointer; }
+  .pin { width: 96px; text-align: center; cursor: pointer; }
   .pin .shot {
     width: 52px; height: 52px; margin: 0 auto;
     border-radius: 50%;
@@ -176,6 +176,7 @@
     return;
   }
 
+  try {
   var rows = window.PROPERTIES;
   var mapped = rows.filter(function (r) { return r.scraped.lat != null && r.scraped.lng != null; });
   var unmapped = rows.filter(function (r) { return r.scraped.lat == null || r.scraped.lng == null; });
@@ -195,8 +196,32 @@
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
   }).addTo(map);
 
+  // Units in one building geocode to the same point, so their markers land
+  // exactly on top of each other and only the top one is clickable. Fan any
+  // collided group out — in *screen* space, by shifting each icon's anchor, so
+  // the separation stays constant at every zoom and no marker is moved off its
+  // real coordinate. A geographic offset can't do this: the metres needed to
+  // separate two 52px pins depend entirely on how far you're zoomed in.
+  // Deterministic by index, so pins don't shuffle between reloads.
+  var PIN_W = 96, PIN_H = 78, FAN_RADIUS = 34;
+  var atPoint = {};
+  mapped.forEach(function (r) {
+    var key = r.scraped.lat.toFixed(5) + ',' + r.scraped.lng.toFixed(5);
+    (atPoint[key] = atPoint[key] || []).push(r);
+  });
+  var anchorShift = {};
+  Object.keys(atPoint).forEach(function (key) {
+    var group = atPoint[key];
+    if (group.length < 2) return;
+    group.forEach(function (r, i) {
+      var angle = (2 * Math.PI * i) / group.length - Math.PI / 2;
+      anchorShift[r.id] = [FAN_RADIUS * Math.cos(angle), FAN_RADIUS * Math.sin(angle)];
+    });
+  });
+
   mapped.forEach(function (r) {
     var s = r.scraped;
+    var shift = anchorShift[r.id] || [0, 0];
     var color = STATUS_COLORS[r.mine.status] || STATUS_COLORS.new;
     var shot = s.photo
       ? '<div class="shot" style="background-image:url(\'' + esc(s.photo) + '\')"></div>'
@@ -209,7 +234,10 @@
         className: '',
         html: '<div class="pin ' + esc(r.mine.status) + '" style="--ring:' + color + '">' +
               shot + '<span class="chip">' + chipBits.join(' · ') + '</span></div>',
-        iconSize: [96, 78]
+        iconSize: [PIN_W, PIN_H],
+        // Anchored at the photo's centre so the pin sits on its coordinate.
+        // Leaflet owns the positioning; CSS margins would fight it.
+        iconAnchor: [PIN_W / 2 - shift[0], 26 - shift[1]]
       })
     }).addTo(map);
 
@@ -249,6 +277,11 @@
 
   if (rows.length === 0) {
     notice('Text Plow a photo of a listing to add the first one.');
+  }
+  } catch (err) {
+    // One malformed row must not leave a blank page with no explanation.
+    notice('<strong>Could not draw the map.</strong> data.js loaded but a property is malformed: ' +
+           esc(String((err && err.message) || err)), true);
   }
 })();
 </script>

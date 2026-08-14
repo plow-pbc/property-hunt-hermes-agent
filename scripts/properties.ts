@@ -13,6 +13,7 @@ import {
   readStore,
   removeProperty,
   setMine,
+  slugify,
   upsertScraped,
   writeStore,
   MINE_FIELDS,
@@ -152,8 +153,7 @@ function main(argv: string[]): void {
       const before = rows.length;
       const next = upsertScraped(rows, scraped);
       writeStore(dir, next);
-      const row = next.find((r) => r.scraped.listing_url === scraped.listing_url) ?? next[next.length - 1];
-      process.stdout.write(`${next.length > before ? 'added' : 'refreshed'} ${row.id}\n`);
+      process.stdout.write(`${next.length > before ? 'added' : 'refreshed'} ${slugify(scraped)}\n`);
       return;
     }
     case 'set': {

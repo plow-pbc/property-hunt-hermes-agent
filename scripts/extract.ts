@@ -126,12 +126,13 @@ export function geocodeQuery(parts: {
   zip: string;
 }): string {
   const street = parts.address
-    // "#" is not a word character, so it needs its own branch — \b never
-    // matches between a space and a "#".
-    .replace(/,?\s*(?:\b(?:unit|apt|apartment|ste|suite|no\.?)\b\s*[\w-]+|#\s*[\w-]+)\s*$/i, '')
+    // The optional period lives inside the group ("Apt." is as common as
+    // "Apt"), and "#" needs its own branch because \b never matches between a
+    // space and a "#".
+    .replace(/,?\s*(?:\b(?:unit|apt|apartment|ste|suite|no|rm|fl)\.?\s*#?\s*[\w-]+|#\s*[\w-]+)\s*$/i, '')
     .replace(/,\s*$/, '')
     .trim();
-  return [street || parts.address, parts.city, parts.state, parts.zip].filter(Boolean).join(', ');
+  return [street, parts.city, parts.state, parts.zip].filter(Boolean).join(', ');
 }
 
 function statusFrom(availability: unknown): string | null {
@@ -201,8 +202,11 @@ export function extractScraped(page: PageSurfaces, now: string = new Date().toIS
   const floorPlan = listing ? (firstDeep(listing, 'accommodationFloorPlan') as Record<string, unknown> | undefined) : undefined;
   const floorSize = listing ? firstDeep(listing, 'floorSize') : undefined;
 
-  const listingUrl =
-    (typeof listing?.url === 'string' ? listing.url : undefined) ?? og['og:url'] ?? page.url;
+  // og:url and JSON-LD url are sometimes site-relative; resolve against the page.
+  const listingUrl = new URL(
+    (typeof listing?.url === 'string' ? listing.url : undefined) ?? og['og:url'] ?? page.url,
+    page.url,
+  ).href;
 
   const image = listing ? firstDeep(listing, 'image') : undefined;
   const imageUrl =
@@ -232,6 +236,6 @@ export function extractScraped(page: PageSurfaces, now: string = new Date().toIS
       photo: null,
       last_scraped_at: now,
     },
-    photoUrl: imageUrl ?? null,
+    photoUrl: imageUrl ? new URL(imageUrl, page.url).href : null,
   };
 }

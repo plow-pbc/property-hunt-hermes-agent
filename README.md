@@ -20,11 +20,14 @@ from your Plow folder.
 ## What it doesn't need
 
 No server. No API key. No account. No build step. Open the HTML file from Finder
-and it works — the map is [Leaflet](https://leafletjs.com) with
-[OpenStreetMap](https://www.openstreetmap.org/copyright) tiles, both bundled, and
-your data is a plain JSON file the page loads directly.
+and it works — the map is [Leaflet](https://leafletjs.com), bundled, and your
+data is a plain JSON file the page loads directly.
 
-Nothing leaves your Mac except the listing lookups themselves.
+Three things do go out over the network, and nothing else: the listing lookup
+itself, [OpenStreetMap](https://www.openstreetmap.org/copyright) map tiles
+fetched while you have the map open, and one
+[Nominatim](https://nominatim.org) geocoding request per property to turn its
+address into a pin. Your notes and ratings never leave your Mac.
 
 ## Requirements
 
@@ -43,10 +46,6 @@ index.html   the map
 
 It's yours. Upgrading or removing the skill never touches it. `data.js` is plain
 JSON, so you can read it, diff it, or keep it in git.
-
-Addresses are geocoded through OpenStreetMap's
-[Nominatim](https://nominatim.org) service, which is the only third party
-involved beyond the listing site itself.
 
 ## Development
 

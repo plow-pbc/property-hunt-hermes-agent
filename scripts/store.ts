@@ -73,16 +73,18 @@ function normalizeWords(value: string): string {
 /**
  * The dedup key. Same house written any reasonable way → same slug.
  *
- * Keyed on zip rather than city because listing sites disagree about what
- * "city" means: Compass's detail page reports `addressLocality` as the
- * *neighborhood* ("Noe Valley") while its search page reports the city ("San
- * Francisco"). Keying on city would file one house twice depending on which
- * page it was scraped from. Zip is the same on both, and already implies city.
- * City is only the fallback for a listing with no zip.
+ * Keyed on zip, never city, because listing sites disagree about what "city"
+ * means: Compass's detail page reports `addressLocality` as the *neighborhood*
+ * ("Noe Valley") while its search page reports the city ("San Francisco"), so a
+ * city key files one house twice depending on which page it came from.
+ *
+ * There is deliberately no city fallback — a key with two possible forms is the
+ * same bug in a different costume, since the same house would land under a
+ * different id depending on whether the scrape found a zip. `coerceScraped`
+ * requires a zip instead, and fails loudly without one.
  */
-export function slugify(parts: { address: string; city: string; state: string; zip?: string }): string {
-  const locality = parts.zip && parts.zip.trim() !== '' ? parts.zip : parts.city;
-  return [parts.address, locality, parts.state].map(normalizeWords).filter(Boolean).join('-');
+export function slugify(parts: { address: string; state: string; zip: string }): string {
+  return [parts.address, parts.zip, parts.state].map(normalizeWords).filter(Boolean).join('-');
 }
 
 export function emptyStoreText(): string {
@@ -129,7 +131,13 @@ export function readStore(dir: string): Property[] {
   return parseStore(fs.readFileSync(dataFile(dir), 'utf8'));
 }
 
-/** Atomic: the frontend may have the file open, and a torn write loses everything. */
+/**
+ * Rename is atomic, so a reader never sees a half-written store — which matters
+ * because the map may have the file open. This is not a concurrency lock: two
+ * simultaneous writers would still lose one update. Nothing here writes
+ * concurrently (one agent, one command at a time), so a lock would be cost
+ * without benefit.
+ */
 export function writeStore(dir: string, rows: Property[]): void {
   const tmp = path.join(dir, `.data.js.tmp-${process.pid}`);
   fs.writeFileSync(tmp, serializeStore(rows));
@@ -178,8 +186,12 @@ export function setMine(rows: Property[], id: string, field: string, value: stri
     mine.rating = rating;
   } else if (field === 'status') {
     mine.status = value;
-  } else {
+  } else if (field === 'notes') {
     mine.notes = value;
+  } else {
+    // Reachable only if MINE_FIELDS gains an entry without a branch here.
+    // Failing beats silently writing the new field's value into notes.
+    throw new Error(`${field} is listed as settable but has no write path`);
   }
 
   const next = rows.slice();
@@ -198,10 +210,25 @@ export function coerceScraped(input: unknown): Scraped {
   }
   const raw = input as Record<string, unknown>;
 
-  for (const key of ['address', 'city', 'state'] as const) {
+  // The documented one-liner pipes scrape.ts straight into upsert, so a failed
+  // scrape arrives here as its error payload. Surface that instead of the
+  // misleading "address is required" it would otherwise produce.
+  if (raw.type === 'tool_error') {
+    throw new Error(`the scrape failed, so there is nothing to save: ${raw.error ?? 'unknown error'}`);
+  }
+
+  for (const key of ['address', 'state', 'zip'] as const) {
     if (typeof raw[key] !== 'string' || (raw[key] as string).trim() === '') {
       throw new Error(`scraped.${key} is required and must be a non-empty string — it forms the dedup key`);
     }
+  }
+  if (typeof raw.city !== 'string' || raw.city.trim() === '') {
+    throw new Error('scraped.city is required and must be a non-empty string');
+  }
+  // Punctuation-only text passes the non-empty check but normalizes away,
+  // which would silently merge unrelated houses under a truncated key.
+  if (normalizeWords(raw.address as string) === '') {
+    throw new Error(`scraped.address has no usable characters: ${JSON.stringify(raw.address)}`);
   }
   if (typeof raw.listing_url !== 'string' || !/^https?:\/\//i.test(raw.listing_url)) {
     throw new Error('scraped.listing_url is required and must be an http(s) URL');
@@ -223,11 +250,19 @@ export function coerceScraped(input: unknown): Scraped {
     return String(value);
   };
 
+  // `rm` deletes this path relative to the properties folder, and the agent
+  // that writes it also reads untrusted listing pages — so it must not be able
+  // to name a file outside photos/.
+  const photo = asText('photo');
+  if (photo !== null && !/^photos\/[A-Za-z0-9._-]+$/.test(photo)) {
+    throw new Error(`scraped.photo must be a plain filename under photos/, got ${JSON.stringify(photo)}`);
+  }
+
   return {
     address: (raw.address as string).trim(),
     city: (raw.city as string).trim(),
     state: (raw.state as string).trim(),
-    zip: typeof raw.zip === 'string' ? raw.zip.trim() : '',
+    zip: (raw.zip as string).trim(),
     lat: asNumber('lat'),
     lng: asNumber('lng'),
     price: asNumber('price'),
@@ -239,7 +274,7 @@ export function coerceScraped(input: unknown): Scraped {
     listing_url: listingUrl,
     // Any host is supported; the source label just falls out of the URL.
     listing_source: asText('listing_source') ?? new URL(listingUrl).hostname.replace(/^www\./, ''),
-    photo: asText('photo'),
+    photo,
     last_scraped_at: asText('last_scraped_at') ?? new Date().toISOString(),
   };
 }

@@ -111,33 +111,26 @@ test('the same house written different ways is the same house', () => {
   }
 });
 
-test('a neighborhood and its city are the same house', () => {
+test('the key ignores what a site calls the locality', () => {
   // Compass reports addressLocality as the neighborhood on a detail page and
   // the city on a search page. Keying on zip is what keeps those one record.
   assert.equal(
-    slugify({ address: '424 28th St', city: 'Noe Valley', state: 'CA', zip: '94131' }),
-    slugify({ address: '424 28th St', city: 'San Francisco', state: 'CA', zip: '94131' }),
+    slugify({ address: '424 28th St', state: 'CA', zip: '94131' }),
+    '424-28th-st-94131-ca',
   );
 });
 
 test('different houses do not collide', () => {
-  const sf = { city: 'San Francisco', state: 'CA', zip: '94131' };
+  const sf = { state: 'CA', zip: '94131' };
   assert.notEqual(slugify({ ...sf, address: '424 28th St' }), slugify({ ...sf, address: '424 28th Ave' }));
   assert.notEqual(
-    slugify({ address: '424 28th St', city: 'San Francisco', state: 'CA', zip: '94131' }),
-    slugify({ address: '424 28th St', city: 'Oakland', state: 'CA', zip: '94609' }),
-  );
-});
-
-test('a listing with no zip still gets a usable key', () => {
-  assert.equal(
-    slugify({ address: '424 28th St', city: 'San Francisco', state: 'CA', zip: '' }),
-    '424-28th-st-san-francisco-ca',
+    slugify({ address: '424 28th St', state: 'CA', zip: '94131' }),
+    slugify({ address: '424 28th St', state: 'CA', zip: '94609' }),
   );
 });
 
 test('a unit number distinguishes two homes at one street address', () => {
-  const at = { city: 'San Francisco', state: 'CA', zip: '94123' };
+  const at = { state: 'CA', zip: '94123' };
   assert.notEqual(
     slugify({ ...at, address: '1501 Greenwich Street, Unit 101' }),
     slugify({ ...at, address: '1501 Greenwich Street, Unit 202' }),
@@ -180,19 +173,26 @@ test('a corrupt store throws instead of silently becoming an empty one', () => {
 
 // --- Agent-supplied input ---------------------------------------------------
 
+const VALID = {
+  address: '1 A St',
+  city: 'San Francisco',
+  state: 'CA',
+  zip: '94131',
+  listing_url: 'https://x.com/y',
+};
+
 test('a listing from any site is accepted and labeled by its host', () => {
   for (const [url, expected] of [
     ['https://www.compass.com/homedetails/x/1_pid/', 'compass.com'],
     ['https://www.zillow.com/homedetails/x/1_zpid/', 'zillow.com'],
     ['https://redfin.com/CA/SF/x', 'redfin.com'],
   ] as const) {
-    const out = coerceScraped({ address: '1 A St', city: 'SF', state: 'CA', listing_url: url });
-    assert.equal(out.listing_source, expected);
+    assert.equal(coerceScraped({ ...VALID, listing_url: url }).listing_source, expected);
   }
 });
 
 test('missing optional fields become null rather than undefined', () => {
-  const out = coerceScraped({ address: '1 A St', city: 'SF', state: 'CA', listing_url: 'https://x.com/y' });
+  const out = coerceScraped(VALID);
   for (const key of ['lat', 'lng', 'price', 'beds', 'baths', 'sqft', 'photo'] as const) {
     assert.equal(out[key], null, `${key} must be null so JSON.stringify keeps it visible`);
   }
@@ -200,12 +200,35 @@ test('missing optional fields become null rather than undefined', () => {
 });
 
 test('input that would corrupt the dedup key is rejected', () => {
-  const base = { address: '1 A St', city: 'SF', state: 'CA', listing_url: 'https://x.com/y' };
-  assert.throws(() => coerceScraped({ ...base, address: '' }), /address is required/);
-  assert.throws(() => coerceScraped({ ...base, city: undefined }), /city is required/);
-  assert.throws(() => coerceScraped({ ...base, listing_url: 'not-a-url' }), /listing_url/);
-  assert.throws(() => coerceScraped({ ...base, price: 'a lot' }), /price must be a number/);
+  assert.throws(() => coerceScraped({ ...VALID, address: '' }), /address is required/);
+  assert.throws(() => coerceScraped({ ...VALID, zip: undefined }), /zip is required/);
+  assert.throws(() => coerceScraped({ ...VALID, city: undefined }), /city is required/);
+  assert.throws(() => coerceScraped({ ...VALID, listing_url: 'not-a-url' }), /listing_url/);
+  assert.throws(() => coerceScraped({ ...VALID, price: 'a lot' }), /price must be a number/);
   assert.throws(() => coerceScraped('nope'), /must be a JSON object/);
+});
+
+test('an address that survives the non-empty check but normalizes away is rejected', () => {
+  // '###' is a non-empty string, but slugs to nothing — which would file the
+  // house under a truncated key shared with every other punctuation address.
+  assert.throws(() => coerceScraped({ ...VALID, address: '###' }), /no usable characters/);
+});
+
+test('a failed scrape is reported as the scrape failure, not as bad input', () => {
+  // The documented one-liner pipes scrape.ts straight into upsert.
+  assert.throws(
+    () => coerceScraped({ type: 'tool_error', error: 'browser unavailable: service unreachable' }),
+    /the scrape failed.*browser unavailable/s,
+  );
+});
+
+test('photo can only name a file inside photos/', () => {
+  // rm deletes this path, and the agent that writes it also reads untrusted
+  // listing pages.
+  for (const bad of ['../../../etc/passwd', '/etc/passwd', 'photos/../../x', 'photos/sub/dir.jpg']) {
+    assert.throws(() => coerceScraped({ ...VALID, photo: bad }), /plain filename under photos/);
+  }
+  assert.equal(coerceScraped({ ...VALID, photo: 'photos/a-1_b.jpg' }).photo, 'photos/a-1_b.jpg');
 });
 
 // --- Durability -------------------------------------------------------------

@@ -95,6 +95,8 @@ test('the add-then-annotate-then-refresh flow a user actually does', () => {
   assert.equal(row.mine.rating, 4);
   assert.equal(row.mine.notes, 'sweeping views, needs a new roof');
   assert.equal(row.mine.status, 'toured');
+
+  assert.match(run(dir, 'list'), /\n1 property\n/, 'one house is not "1 properties"');
 });
 
 test('multi-word notes survive the shell without quoting gymnastics', () => {

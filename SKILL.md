@@ -23,7 +23,9 @@ Idempotent and safe to re-run. It creates the folder, the map page, and an empty
 store — and never touches properties already saved. Run it before anything else;
 if the folder is already set up it just prints where it is.
 
-Below, `$PH` means `/workspace/host/skills/property-hunt/scripts`.
+Every command below uses that same full path. Write it out each time — each
+command runs in its own shell, so a shell variable set in one does not survive
+into the next.
 
 ## Adding a property
 
@@ -40,7 +42,8 @@ Then:
 2. **Scrape it, and save it:**
 
 ```sh
-node $PH/properties.ts upsert --scraped "$(node $PH/scrape.ts '<listing-url>')"
+cd /workspace/host/skills/property-hunt/scripts
+node properties.ts upsert --scraped "$(node scrape.ts '<listing-url>')"
 ```
 
 `scrape.ts` drives the browser, reads the listing, geocodes the address, and
@@ -49,8 +52,8 @@ downloads the hero photo. It prints the record; `upsert` files it.
 3. **Tell the user what you saved** — one line: address, price, beds/baths/sqft.
 
 **If the scrape fails** it prints `{"type":"tool_error","error":"..."}` instead of
-a record. Read the error and tell the user plainly. Do not pass that object to
-`upsert`, and do not invent values you could not measure.
+a record. `upsert` recognises that and refuses, repeating the error — read it,
+tell the user plainly, and do not invent values you could not measure.
 
 ## Editing
 
@@ -58,17 +61,18 @@ Everything the user says about a property maps onto the same few commands. Read
 the store, work out which house they mean, then act.
 
 ```sh
-node $PH/properties.ts list              # human-readable
-node $PH/properties.ts list --json       # everything, for you to reason over
-node $PH/properties.ts set <id> rating 4
-node $PH/properties.ts set <id> status toured
-node $PH/properties.ts set <id> notes needs a new roof, great light
-node $PH/properties.ts rm <id>
+cd /workspace/host/skills/property-hunt/scripts
+node properties.ts list              # human-readable
+node properties.ts list --json       # everything, for you to reason over
+node properties.ts set <id> rating 4
+node properties.ts set <id> status toured
+node properties.ts set <id> notes 'needs a new roof, great light'
+node properties.ts rm <id>
 ```
 
 `status` is free text; `new`, `interested`, `toured`, and `passed` are the ones
-the map colours. `rating` is 1–5. Notes do not need quoting — trailing words are
-joined.
+the map colours. `rating` is 1–5. **Always single-quote a note** — it may contain
+commas, apostrophes, or anything else the user said.
 
 Match loosely and confirm: *"the one on Elm"* means read `list --json` and find
 it. If two could match, ask which.
@@ -103,5 +107,5 @@ one opens the listing. Tell them where it is the first time they add a property.
 ## Checking your own work
 
 ```sh
-node --test $PH/*.test.ts
+cd /workspace/host/skills/property-hunt/scripts && node --test *.test.ts
 ```

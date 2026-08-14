@@ -107,7 +107,11 @@ test('a condo geocodes by its building, keeping the unit in the address', () => 
     '1501 Greenwich St Unit 101',
     '1501 Greenwich St #101',
     '1501 Greenwich St, Apt 101',
+    '1501 Greenwich St, Apt. 101',
     '1501 Greenwich St, Ste 101',
+    '1501 Greenwich St, Ste. 101',
+    '1501 Greenwich St Unit#101',
+    '1501 Greenwich St, No. 101',
   ]) {
     assert.equal(geocodeQuery({ ...sf, address }), expected, `${address} should geocode by building`);
   }
