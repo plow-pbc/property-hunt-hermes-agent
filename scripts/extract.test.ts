@@ -63,13 +63,22 @@ test('a listing that cannot be keyed is rejected by the same rules that save it'
       {
         '@type': 'SingleFamilyResidence',
         url: 'https://example.com/y',
-        address: { '@type': 'PostalAddress', streetAddress: '12 Elm St', addressLocality: 'Springfield' },
+        // Everything present EXCEPT postalCode, so this pins the zip rule
+        // specifically — with addressRegion missing too, the check would trip
+        // on `state` first and stay green even if the zip rule were deleted.
+        address: {
+          '@type': 'PostalAddress',
+          streetAddress: '12 Elm St',
+          addressLocality: 'Springfield',
+          addressRegion: 'IL',
+        },
       },
     ],
     og: { 'og:title': '12 Elm St — For Sale' },
   });
   assert.equal(scraped.zip, '', 'the page genuinely had no zip');
-  assert.throws(() => coerceScraped(scraped), /required.*dedup key/s);
+  assert.equal(scraped.state, 'IL', 'everything else the key needs is present');
+  assert.throws(() => coerceScraped(scraped), /scraped\.zip is required/);
 });
 
 // --- The pieces, so a failure points at which surface changed ---------------

@@ -59,21 +59,36 @@ async function harvest(browser: any, url: string): Promise<PageSurfaces> {
 /**
  * `goto` resolves while the page is still a client-side shell — a fixed sleep
  * either wastes time or reads an empty page and looks exactly like a bot wall.
- * Poll for the real success condition instead: surfaces the parser can use.
+ * Poll instead, until the page yields a record the store will actually accept.
+ *
+ * Validating *inside* the loop is the point: a page can mount its JSON-LD
+ * (whose PostalAddress often has no postalCode) before the og:title that
+ * carries the full "…, San Francisco, CA 94131" line. Checking only after the
+ * loop would abort on that half-rendered state when one more poll would have
+ * produced a saveable record — the retry mechanism has to be able to see the
+ * failure it exists to ride out.
  */
-async function scrapeRendered(browser: any, url: string): Promise<ReturnType<typeof extractScraped>> {
+async function scrapeRendered(browser: any, url: string): Promise<{ scraped: Scraped; photoUrl: string | null }> {
   await browser.goto(url);
   const deadline = Date.now() + RENDER_TIMEOUT_MS;
   let lastError = 'page never rendered a listing';
   while (Date.now() < deadline) {
     try {
-      return extractScraped(await harvest(browser, url));
+      const { scraped, photoUrl } = extractScraped(await harvest(browser, url));
+      // The same rules `upsert` applies — so anything unsaveable fails here,
+      // before the geocode and photo download that would otherwise leave an
+      // orphaned image named for a slug no row will ever carry.
+      return { scraped: coerceScraped(scraped), photoUrl };
     } catch (err) {
       lastError = (err as Error).message;
       await sleep(POLL_INTERVAL_MS);
     }
   }
-  throw new Error(`gave up after ${RENDER_TIMEOUT_MS / 1000}s: ${lastError}`);
+  throw new Error(
+    `could not read a saveable listing from ${url} after ${RENDER_TIMEOUT_MS / 1000}s. ` +
+      `Last problem: ${lastError}. If the page genuinely does not publish that field, ` +
+      'try this property on another listing site — do not supply a value of your own.',
+  );
 }
 
 /** Keyless, same OpenStreetMap ecosystem the map tiles come from. */
@@ -123,13 +138,7 @@ async function main(): Promise<void> {
     throw err;
   }
 
-  const { scraped: parsed, photoUrl } = await scrapeRendered(browser, url);
-
-  // Validate with the exact rules `upsert` applies, before spending anything.
-  // A record that cannot be saved must fail here — otherwise we geocode it,
-  // download its photo, print it, and only then have upsert reject it, leaving
-  // an orphaned image named after a slug no row will ever carry.
-  const scraped = coerceScraped(parsed);
+  const { scraped, photoUrl } = await scrapeRendered(browser, url);
   const id = slugify(scraped);
   const dir = resolveDataDir();
 
