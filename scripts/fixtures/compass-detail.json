@@ -11,14 +11,6 @@
             "Product"
           ],
           "@id": "https://www.compass.com/homedetails/424-28th-St-San-Francisco-CA-94131/1QUY9H_pid/",
-          "mpn": "2169967561038148601",
-          "brand": {
-            "@context": "https://schema.org",
-            "@type": "Brand",
-            "name": "Compass Real Estate",
-            "logo": "https://www.compass.com/ucfe-assets/public-media/compass_logo.svg",
-            "url": "https://www.compass.com"
-          },
           "url": "https://www.compass.com/homedetails/424-28th-St-San-Francisco-CA-94131/1QUY9H_pid/",
           "containedInPlace": {
             "@type": "Place",
@@ -48,30 +40,9 @@
               "@id": "https://www.compass.com/homedetails/424-28th-St-San-Francisco-CA-94131/1QUY9H_pid/#image-0",
               "@type": "ImageObject",
               "url": "https://www.compass.com/m/aee926bb07ae1a8e435e34bddf1b453a48dca5118b0ec572431fb135df126b8c/origin.jpg"
-            },
-            {
-              "@id": "https://www.compass.com/homedetails/424-28th-St-San-Francisco-CA-94131/1QUY9H_pid/#image-1",
-              "@type": "ImageObject",
-              "url": "https://www.compass.com/m/e8a9744afe143ea2187d3879506f0eadbc6fde4be5600cda9644503632277527/origin.jpg"
-            },
-            {
-              "@id": "https://www.compass.com/homedetails/424-28th-St-San-Francisco-CA-94131/1QUY9H_pid/#image-2",
-              "@type": "ImageObject",
-              "url": "https://www.compass.com/m/4741124b1a95f62a10f076a52d1c01d8ab00db1be97876cb6993362b98f61673/origin.jpg"
-            },
-            {
-              "@id": "https://www.compass.com/homedetails/424-28th-St-San-Francisco-CA-94131/1QUY9H_pid/#image-3",
-              "@type": "ImageObject",
-              "url": "https://www.compass.com/m/f5dd86ee5f7636324555ad9f039f0c454db7b7b494ec6a50968c734ada1456c7/origin.jpg"
-            },
-            {
-              "@id": "https://www.compass.com/homedetails/424-28th-St-San-Francisco-CA-94131/1QUY9H_pid/#image-4",
-              "@type": "ImageObject",
-              "url": "https://www.compass.com/m/16d5a3a9591239730fc6599d9dd7698ca8e9df4e2925b3c874f4bd3695ee4294/origin.jpg"
             }
           ],
           "name": "424 28th St, San Francisco, CA 94131",
-          "numberOfRooms": "3",
           "offers": {
             "@type": "Offer",
             "@id": "https://www.compass.com/homedetails/424-28th-St-San-Francisco-CA-94131/1QUY9H_pid/#offer",
@@ -187,13 +158,6 @@
     "og:title": "424 28th St, San Francisco, CA 94131 | MLS #426153785",
     "og:description": "424 28th St, San Francisco, CA 94131 is a single family home that will be listed for sale at $3,250,000. This is a 3-bed, 3-bath, 2,315 sqft property.",
     "og:url": "https://www.compass.com/homedetails/424-28th-St-San-Francisco-CA-94131/1QUY9H_pid/",
-    "og:image": "https://www.compass.com/m/aee926bb07ae1a8e435e34bddf1b453a48dca5118b0ec572431fb135df126b8c/640x480.jpg",
-    "og:image:width": "1200",
-    "og:image:height": "630",
-    "twitter:card": "summary",
-    "twitter:title": "424 28th St, San Francisco, CA 94131 | MLS #426153785",
-    "twitter:description": "424 28th St, San Francisco, CA 94131 is a single family home that will be listed for sale at $3,250,000. This is a 3-bed, 3-bath, 2,315 sqft property.",
-    "twitter:url": "https://www.compass.com/homedetails/424-28th-St-San-Francisco-CA-94131/1QUY9H_pid/",
-    "twitter:image": "//www.compass.com/m/aee926bb07ae1a8e435e34bddf1b453a48dca5118b0ec572431fb135df126b8c/640x480.jpg"
+    "og:image": "https://www.compass.com/m/aee926bb07ae1a8e435e34bddf1b453a48dca5118b0ec572431fb135df126b8c/640x480.jpg"
   }
 }
