@@ -123,7 +123,7 @@ function main(argv: string[]): void {
   }
 
   if (!fs.existsSync(path.join(dir, 'data.js'))) {
-    throw new Error(`no store at ${dir} — run "properties.ts init" first`);
+    throw new Error(`no store at ${dir} — run "node properties.ts init" first`);
   }
   const rows = readStore(dir);
 

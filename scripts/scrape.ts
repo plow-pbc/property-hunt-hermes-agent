@@ -137,7 +137,7 @@ async function downloadPhoto(photoUrl: string, dir: string, id: string): Promise
 async function main(): Promise<void> {
   const url = process.argv[2];
   if (!url || !/^https?:\/\//i.test(url)) {
-    toolError('usage: scrape.ts <listing-url>');
+    toolError("usage: node scrape.ts '<listing-url>'");
     return;
   }
 
