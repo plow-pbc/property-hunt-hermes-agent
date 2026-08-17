@@ -68,10 +68,8 @@ async function main(): Promise<void> {
       'czf', '-',
       '-C', path.dirname(BUNDLE_ROOT),
       '--exclude', '.git',
+      '--exclude', 'docs',
       '--exclude', '.DS_Store',
-      // Same file .clawhubignore keeps out of the published bundle, so a dev
-      // install rehearses what users actually receive.
-      '--exclude', 'install-local.ts',
       path.basename(BUNDLE_ROOT),
     ],
     { encoding: 'buffer', maxBuffer: 64 * 1024 * 1024 },
