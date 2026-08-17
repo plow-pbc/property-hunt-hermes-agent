@@ -6,6 +6,7 @@
 // meta. No DOM selectors anywhere, which is what keeps it working across a
 // cosmetic redesign — and what lets it generalize past Compass, since
 // listing_url accepts any host.
+import { UNIT_DESIGNATOR } from './store.ts';
 import type { Scraped } from './store.ts';
 
 export type PageSurfaces = {
@@ -126,10 +127,9 @@ export function geocodeQuery(parts: {
   zip: string;
 }): string {
   const street = parts.address
-    // The optional period lives inside the group ("Apt." is as common as
-    // "Apt"), and "#" needs its own branch because \b never matches between a
-    // space and a "#".
-    .replace(/,?\s*(?:\b(?:unit|apt|apartment|ste|suite|no|rm|fl)\.?\s*#?\s*[\w-]+|#\s*[\w-]+)\s*$/i, '')
+    // Same designator pattern the store canonicalizes on — shared so the two
+    // cannot disagree about what counts as a unit.
+    .replace(UNIT_DESIGNATOR, '')
     .replace(/,\s*$/, '')
     .trim();
   return [street, parts.city, parts.state, parts.zip].filter(Boolean).join(', ');

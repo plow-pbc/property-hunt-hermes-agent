@@ -137,6 +137,33 @@ test('a unit number distinguishes two homes at one street address', () => {
   );
 });
 
+test('every way of writing one condo is one condo', () => {
+  // Listing sites spell the same unit differently, and punctuation-stripping
+  // alone gave each spelling its own id — so re-scraping from another source
+  // filed a second, unannotated record instead of refreshing the first.
+  const at = { state: 'CA', zip: '94123' };
+  const canonical = slugify({ ...at, address: '1501 Greenwich St, Unit 101' });
+  for (const address of [
+    '1501 Greenwich St Unit 101',
+    '1501 Greenwich St #101',
+    '1501 Greenwich St, Apt 101',
+    '1501 Greenwich St, Apt. 101',
+    '1501 Greenwich St, Ste 101',
+    '1501 Greenwich St, No. 101',
+    '1501 Greenwich St Unit#101',
+    '1501 Greenwich Street, unit 101',
+  ]) {
+    assert.equal(slugify({ ...at, address }), canonical, `${address} must be the same home`);
+  }
+});
+
+test('a street address that merely ends in a number keeps its own id', () => {
+  // The canonicalizer must not invent a unit where the address has none.
+  const at = { state: 'CA', zip: '94131' };
+  assert.equal(slugify({ ...at, address: '424 28th St' }), '424-28th-st-94131-ca');
+  assert.equal(slugify({ ...at, address: 'Highway 1' }), 'hwy-1-94131-ca');
+});
+
 // --- File format ------------------------------------------------------------
 
 test('what we write is what we can read back', () => {

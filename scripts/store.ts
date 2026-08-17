@@ -60,6 +60,29 @@ const SUFFIXES: Record<string, string> = {
   west: 'w',
 };
 
+/**
+ * A trailing unit designator: "Unit 101", "Apt. 101", "#101", "No. 5", "Ste 200".
+ * The unit number is captured either way — worded or bare-`#`.
+ *
+ * One pattern, two consumers with opposite needs: `slugify` canonicalizes the
+ * match so every spelling of one condo produces one id, while `geocodeQuery`
+ * strips it entirely (a geocoder resolves buildings, not apartments). Sharing
+ * the constant is what keeps those two from drifting apart on which spellings
+ * they recognize.
+ */
+export const UNIT_DESIGNATOR =
+  /,?\s*(?:\b(?:unit|apt|apartment|ste|suite|no|rm|fl)\.?\s*#?\s*([\w-]+)|#\s*([\w-]+))\s*$/i;
+
+/**
+ * Collapse every spelling of a unit to one form, so "#101", "Apt 101", and
+ * "Unit 101" are the same home. Without this, punctuation-stripping alone
+ * yields a different id per spelling — and a re-scrape from another source
+ * files a second, unannotated record instead of refreshing the first.
+ */
+function canonicalizeUnit(address: string): string {
+  return address.replace(UNIT_DESIGNATOR, (_match, worded, hashed) => ` unit ${worded ?? hashed}`);
+}
+
 function normalizeWords(value: string): string {
   return value
     .toLowerCase()
@@ -84,7 +107,10 @@ function normalizeWords(value: string): string {
  * requires a zip instead, and fails loudly without one.
  */
 export function slugify(parts: { address: string; state: string; zip: string }): string {
-  return [parts.address, parts.zip, parts.state].map(normalizeWords).filter(Boolean).join('-');
+  return [canonicalizeUnit(parts.address), parts.zip, parts.state]
+    .map(normalizeWords)
+    .filter(Boolean)
+    .join('-');
 }
 
 export function emptyStoreText(): string {

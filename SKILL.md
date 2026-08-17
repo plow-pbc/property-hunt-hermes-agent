@@ -49,6 +49,9 @@ node properties.ts upsert --scraped "$(node scrape.ts '<listing-url>')"
 `scrape.ts` drives the browser, reads the listing, geocodes the address, and
 downloads the hero photo. It prints the record; `upsert` files it.
 
+The URL is single-quoted above because it is not a value you wrote. Escape it
+per **Quoting** below — that applies to every dynamic value, not just notes.
+
 3. **Tell the user what you saved** — one line: address, price, beds/baths/sqft.
 
 **If the scrape fails** it prints `{"type":"tool_error","error":"..."}` instead of
@@ -71,8 +74,22 @@ node properties.ts rm <id>
 ```
 
 `status` is free text; `new`, `interested`, `toured`, and `passed` are the ones
-the map colours. `rating` is 1–5. **Always single-quote a note** — it may contain
-commas, apostrophes, or anything else the user said.
+the map colours. `rating` is 1–5.
+
+### Quoting — this one bites
+
+Single-quote every value you did not write yourself: notes, statuses, addresses,
+listing URLs. **A single-quoted string cannot contain an apostrophe**, so before
+you wrap a value, replace every `'` in it with `'\''`:
+
+```sh
+# The user said: needs a roof, don't love the kitchen
+node properties.ts set <id> notes 'needs a roof, don'\''t love the kitchen'
+```
+
+Skipping this does not merely fail — the value ends the quote early and the rest
+of it is read as shell syntax. That text can come from a listing page you did not
+write, so treat it as hostile input, not as a formatting nicety.
 
 Match loosely and confirm: *"the one on Elm"* means read `list --json` and find
 it. If two could match, ask which.
