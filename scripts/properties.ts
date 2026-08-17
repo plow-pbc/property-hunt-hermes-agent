@@ -28,13 +28,17 @@ const USAGE = `property-hunt store
   init                              scaffold the properties folder (idempotent)
   list [--json]                     every property
   get <id>                          one property as JSON
-  upsert --scraped '<json>'         create or refresh; never touches your notes
+  upsert --scraped "$(scrape.ts <url>)"   create or refresh; never touches your notes
   set <id> <field> <value>          ${MINE_FIELDS.join(' | ')}
   rm <id>                           delete the property and its photo
   where                             print the folder being used
 
 The data folder is $PROPERTY_HUNT_DIR, else /workspace/host/properties inside
-the agent VM, else ~/Plow/properties on a Mac.`;
+the agent VM, else ~/Plow/properties on a Mac.
+
+Single-quoting a value cannot contain an apostrophe, and real addresses have
+them (O'Farrell St). Replace each ' with '\\'' before quoting, or use the
+double-quoted "$(...)" form shown above.`;
 
 /**
  * Resolve the data folder. The same code runs inside the agent container and on
