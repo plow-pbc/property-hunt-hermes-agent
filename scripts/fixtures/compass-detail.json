@@ -20,58 +20,6 @@
             "url": "https://www.compass.com"
           },
           "url": "https://www.compass.com/homedetails/424-28th-St-San-Francisco-CA-94131/1QUY9H_pid/",
-          "amenityFeature": [
-            {
-              "@id": "https://www.compass.com/homedetails/424-28th-St-San-Francisco-CA-94131/1QUY9H_pid/#LocationFeatureSpecification",
-              "@type": "LocationFeatureSpecification",
-              "name": "Bay Views"
-            },
-            {
-              "@id": "https://www.compass.com/homedetails/424-28th-St-San-Francisco-CA-94131/1QUY9H_pid/#LocationFeatureSpecification",
-              "@type": "LocationFeatureSpecification",
-              "name": "Carpet Floors"
-            },
-            {
-              "@id": "https://www.compass.com/homedetails/424-28th-St-San-Francisco-CA-94131/1QUY9H_pid/#LocationFeatureSpecification",
-              "@type": "LocationFeatureSpecification",
-              "name": "Central Heating"
-            },
-            {
-              "@id": "https://www.compass.com/homedetails/424-28th-St-San-Francisco-CA-94131/1QUY9H_pid/#LocationFeatureSpecification",
-              "@type": "LocationFeatureSpecification",
-              "name": "Common Outdoor Space"
-            },
-            {
-              "@id": "https://www.compass.com/homedetails/424-28th-St-San-Francisco-CA-94131/1QUY9H_pid/#LocationFeatureSpecification",
-              "@type": "LocationFeatureSpecification",
-              "name": "Dryer"
-            },
-            {
-              "@id": "https://www.compass.com/homedetails/424-28th-St-San-Francisco-CA-94131/1QUY9H_pid/#LocationFeatureSpecification",
-              "@type": "LocationFeatureSpecification",
-              "name": "Fence"
-            },
-            {
-              "@id": "https://www.compass.com/homedetails/424-28th-St-San-Francisco-CA-94131/1QUY9H_pid/#LocationFeatureSpecification",
-              "@type": "LocationFeatureSpecification",
-              "name": "Fireplace"
-            },
-            {
-              "@id": "https://www.compass.com/homedetails/424-28th-St-San-Francisco-CA-94131/1QUY9H_pid/#LocationFeatureSpecification",
-              "@type": "LocationFeatureSpecification",
-              "name": "Parking Included"
-            },
-            {
-              "@id": "https://www.compass.com/homedetails/424-28th-St-San-Francisco-CA-94131/1QUY9H_pid/#LocationFeatureSpecification",
-              "@type": "LocationFeatureSpecification",
-              "name": "Tile Floors"
-            },
-            {
-              "@id": "https://www.compass.com/homedetails/424-28th-St-San-Francisco-CA-94131/1QUY9H_pid/#LocationFeatureSpecification",
-              "@type": "LocationFeatureSpecification",
-              "name": "Washer"
-            }
-          ],
           "containedInPlace": {
             "@type": "Place",
             "@id": "https://www.compass.com/homedetails/424-28th-St-San-Francisco-CA-94131/1QUY9H_pid/#place",
@@ -87,7 +35,6 @@
               "addressCountry": "US"
             }
           },
-          "description": "In Noe Valley with sweeping views of the San Francisco skyline and the Bay, 424 28th Street is a newly remodeled, detached residence with a new roof offering a rare blend of privacy, radiant light, and modern luxury. Thoughtfully designed across three levels that can live like four bedrooms, the home is bathed in natural light from expansive windows and skylights, while panoramic outlooks create a constant sense of openness and calm.    The main living level seamlessly connects everyday comfort with effortless entertaining. Sunlit living and dining areas flow into a beautifully updated kitchen, appointed with premium new appliances, custom cabinetry, and sleek countertops. Just beyond, a spacious family room anchored by a wood-burning fireplace opens via French doors to the lush exterior, creating an airy indoor-outdoor connection. A versatile bedroom perfect for guests, a den, or an office and a stylish powder room complete this level.  Occupying its own private floor, the primary suite serves as a tranquil sanctuary above the city.   Framed by iconic city and bay views, the suite features two walk-in closets, abundant storage, and direct access to the outdoors. The newly remodeled, spa-like primary bathroom boasts a deep soaking tub, a separate shower, and serene outlooks to the surrounding landscape.  With both interior access and its own separate private entrance, the lower level provides exceptional flexibility. Ideal for guests, an au pair, rental income, or a premium home office, this level features two spacious rooms: one outfitted as a bedroom, and a second flexible space that easily adapts into a functional fourth bedroom.    Flanked by lush greenery on both sides of the house, the spectacular rear grounds feature multi-level terraced gardens that unfold as private outdoor rooms designed for al fresco dining, entertaining, and quiet reflection. Surrounded by mature landscaping, this property offers a remarkable sense of retreat while remaining just moments from the vibrant shops, dining, parks, and transit that make Noe Valley one of San Francisco's most beloved neighborhoods. A big value add for this home is its existing curb cut; a 2-car garage bid with proposed plans are available.",
           "floorSize": [
             {
               "@type": "QuantitativeValue",
@@ -132,44 +79,7 @@
             "name": "424 28th St, San Francisco, CA 94131",
             "url": "https://www.compass.com/homedetails/424-28th-St-San-Francisco-CA-94131/1QUY9H_pid/",
             "price": 3250000,
-            "priceCurrency": "USD",
-            "itemOffered": "https://www.compass.com/homedetails/424-28th-St-San-Francisco-CA-94131/1QUY9H_pid/",
-            "offeredBy": {
-              "url": "https://www.compass.com",
-              "telephone": "628-629-4405",
-              "@type": "Person",
-              "name": "Sarah Tulin",
-              "email": "sarah@luriegroup.com",
-              "@id": "https://www.compass.com/homedetails/424-28th-St-San-Francisco-CA-94131/1QUY9H_pid/#PersonOrOrganization",
-              "address": {
-                "@type": "PostalAddress",
-                "@id": "https://www.compass.com/homedetails/424-28th-St-San-Francisco-CA-94131/1QUY9H_pid/#postalAddress",
-                "streetAddress": "424 28th St",
-                "addressLocality": "Noe Valley",
-                "addressRegion": "CA",
-                "postalCode": "94131",
-                "addressCountry": "US"
-              }
-            },
-            "seller": {
-              "@context": "https://schema.org",
-              "@type": "Organization",
-              "name": "Compass",
-              "logo": "https://www.compass.com/ucfe-assets/public-media/compass_logo.svg",
-              "url": "https://www.compass.com/",
-              "sameAs": [
-                "https://www.facebook.com/compass",
-                "https://twitter.com/compass",
-                "https://www.instagram.com/compass/"
-              ],
-              "contactPoint": [
-                {
-                  "@type": "ContactPoint",
-                  "telephone": "+1-212-913-9058",
-                  "contactType": "customer service"
-                }
-              ]
-            }
+            "priceCurrency": "USD"
           },
           "address": {
             "@type": "PostalAddress",
@@ -191,15 +101,13 @@
                 "@id": "https://www.compass.com/homedetails/424-28th-St-San-Francisco-CA-94131/1QUY9H_pid/#QuantitativeValue"
               }
             ],
-            "description": "In Noe Valley with sweeping views of the San Francisco skyline and the Bay, 424 28th Street is a newly remodeled, detached residence with a new roof offering a rare blend of privacy, radiant light, and modern luxury. Thoughtfully designed across three levels that can live like four bedrooms, the home is bathed in natural light from expansive windows and skylights, while panoramic outlooks create a constant sense of openness and calm.    The main living level seamlessly connects everyday comfort with effortless entertaining. Sunlit living and dining areas flow into a beautifully updated kitchen, appointed with premium new appliances, custom cabinetry, and sleek countertops. Just beyond, a spacious family room anchored by a wood-burning fireplace opens via French doors to the lush exterior, creating an airy indoor-outdoor connection. A versatile bedroom perfect for guests, a den, or an office and a stylish powder room complete this level.  Occupying its own private floor, the primary suite serves as a tranquil sanctuary above the city.   Framed by iconic city and bay views, the suite features two walk-in closets, abundant storage, and direct access to the outdoors. The newly remodeled, spa-like primary bathroom boasts a deep soaking tub, a separate shower, and serene outlooks to the surrounding landscape.  With both interior access and its own separate private entrance, the lower level provides exceptional flexibility. Ideal for guests, an au pair, rental income, or a premium home office, this level features two spacious rooms: one outfitted as a bedroom, and a second flexible space that easily adapts into a functional fourth bedroom.    Flanked by lush greenery on both sides of the house, the spectacular rear grounds feature multi-level terraced gardens that unfold as private outdoor rooms designed for al fresco dining, entertaining, and quiet reflection. Surrounded by mature landscaping, this property offers a remarkable sense of retreat while remaining just moments from the vibrant shops, dining, parks, and transit that make Noe Valley one of San Francisco's most beloved neighborhoods. A big value add for this home is its existing curb cut; a 2-car garage bid with proposed plans are available.",
             "numberOfBathroomsTotal": 3,
             "numberOfFullBathrooms": 2,
             "numberOfPartialBathrooms": 1,
             "numberOfBedrooms": 3,
             "petsAllowed": false,
             "url": "https://www.compass.com/homedetails/424-28th-St-San-Francisco-CA-94131/1QUY9H_pid/"
-          },
-          "speakable": "In Noe Valley with sweeping views of the San Francisco skyline and the Bay, 424 28th Street is a newly remodeled, detached residence with a new roof offering a rare blend of privacy, radiant light, and modern luxury. Thoughtfully designed across three levels that can live like four bedrooms, the home is bathed in natural light from expansive windows and skylights, while panoramic outlooks create a constant sense of openness and calm.    The main living level seamlessly connects everyday comfort with effortless entertaining. Sunlit living and dining areas flow into a beautifully updated kitchen, appointed with premium new appliances, custom cabinetry, and sleek countertops. Just beyond, a spacious family room anchored by a wood-burning fireplace opens via French doors to the lush exterior, creating an airy indoor-outdoor connection. A versatile bedroom perfect for guests, a den, or an office and a stylish powder room complete this level.  Occupying its own private floor, the primary suite serves as a tranquil sanctuary above the city.   Framed by iconic city and bay views, the suite features two walk-in closets, abundant storage, and direct access to the outdoors. The newly remodeled, spa-like primary bathroom boasts a deep soaking tub, a separate shower, and serene outlooks to the surrounding landscape.  With both interior access and its own separate private entrance, the lower level provides exceptional flexibility. Ideal for guests, an au pair, rental income, or a premium home office, this level features two spacious rooms: one outfitted as a bedroom, and a second flexible space that easily adapts into a functional fourth bedroom.    Flanked by lush greenery on both sides of the house, the spectacular rear grounds feature multi-level terraced gardens that unfold as private outdoor rooms designed for al fresco dining, entertaining, and quiet reflection. Surrounded by mature landscaping, this property offers a remarkable sense of retreat while remaining just moments from the vibrant shops, dining, parks, and transit that make Noe Valley one of San Francisco's most beloved neighborhoods. A big value add for this home is its existing curb cut; a 2-car garage bid with proposed plans are available."
+          }
         },
         {
           "@context": "https://schema.org",
