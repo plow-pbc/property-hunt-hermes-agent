@@ -138,12 +138,54 @@ export function isPrivateAddress(ip: string): boolean {
     if (a === 100 && b >= 64 && b <= 127) return true; // carrier-grade NAT
     return a >= 224; // multicast and reserved
   }
-  const ipv6 = ip.toLowerCase().replace(/^\[|\]$/g, '');
-  if (ipv6 === '::1' || ipv6 === '::') return true;
-  if (/^(fc|fd|fe80|ff)/.test(ipv6)) return true;
-  // ::ffff:127.0.0.1 and friends — judge the embedded v4 address.
-  const embedded = ipv6.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-  return embedded ? isPrivateAddress(embedded[1]) : false;
+  // Judge v6 numerically, never by its text. One address has many spellings:
+  // ::ffff:127.0.0.1 and ::ffff:7f00:1 are the same loopback, and matching the
+  // dotted form alone let the hex form through to the very RPC port this guard
+  // exists to protect.
+  const bytes = ipv6Bytes(ip);
+  if (!bytes) return true; // unparseable but isIP-accepted — fail closed
+  if (bytes.every((b) => b === 0)) return true; // ::
+  if (bytes.slice(0, 15).every((b) => b === 0) && bytes[15] === 1) return true; // ::1
+  if ((bytes[0] & 0xfe) === 0xfc) return true; // fc00::/7 unique-local
+  if (bytes[0] === 0xfe && (bytes[1] & 0xc0) === 0x80) return true; // fe80::/10 link-local
+  if (bytes[0] === 0xff) return true; // ff00::/8 multicast
+
+  // Anything embedding a v4 address is judged as that v4 address: ::/64 covers
+  // v4-mapped and v4-translated; 64:ff9b::/96 is NAT64.
+  const embedsV4 =
+    bytes.slice(0, 8).every((b) => b === 0) ||
+    (bytes[0] === 0x00 && bytes[1] === 0x64 && bytes[2] === 0xff && bytes[3] === 0x9b);
+  return embedsV4 ? isPrivateAddress(bytes.slice(12).join('.')) : false;
+}
+
+/** Expand any IPv6 spelling to its 16 bytes, so the checks above compare values. */
+function ipv6Bytes(ip: string): number[] | null {
+  const clean = ip.toLowerCase().replace(/^\[|\]$/g, '').split('%')[0];
+  if (!net.isIPv6(clean)) return null;
+
+  // A trailing dotted quad ("::ffff:127.0.0.1") is two hextets in disguise.
+  let text = clean;
+  const dotted = text.match(/(\d{1,3}(?:\.\d{1,3}){3})$/);
+  if (dotted) {
+    const [a, b, c, d] = dotted[1].split('.').map(Number);
+    text = `${text.slice(0, -dotted[1].length)}${((a << 8) | b).toString(16)}:${((c << 8) | d).toString(16)}`;
+  }
+
+  const [head, tail] = text.split('::');
+  const headParts = head ? head.split(':').filter(Boolean) : [];
+  const tailParts = text.includes('::') && tail ? tail.split(':').filter(Boolean) : [];
+  const parts = text.includes('::')
+    ? [...headParts, ...Array(8 - headParts.length - tailParts.length).fill('0'), ...tailParts]
+    : headParts;
+  if (parts.length !== 8) return null;
+
+  const bytes: number[] = [];
+  for (const part of parts) {
+    const value = Number.parseInt(part, 16);
+    if (!Number.isInteger(value) || value < 0 || value > 0xffff) return null;
+    bytes.push((value >> 8) & 0xff, value & 0xff);
+  }
+  return bytes;
 }
 
 /**

@@ -173,13 +173,25 @@ test('a listing cannot aim the photo fetch at the network behind us', () => {
     '127.0.0.1', '127.1.2.3', '0.0.0.0', '10.0.0.5', '172.16.9.9', '172.31.255.1',
     '192.168.1.1', '169.254.169.254', '100.64.0.1', '224.0.0.1',
     '::1', '::', 'fc00::1', 'fd12::3', 'fe80::1', '::ffff:127.0.0.1',
+    // The spellings the first version of this guard let through: one address
+    // has many texts, so these are judged by value, not by pattern.
+    '::ffff:7f00:1',      // hex spelling of ::ffff:127.0.0.1
+    '::ffff:0:7f00:1',    // v4-translated
+    '64:ff9b::7f00:1',    // NAT64
+    '::ffff:a00:1',       // 10.0.0.1, hex
+    'fe90::1',            // fe80::/10, not just fe80::/16
+    'feb0::1',
+    '[::1]',              // bracketed, as a URL hostname arrives
   ]) {
     assert.equal(isPrivateAddress(blocked), true, `${blocked} must be refused`);
   }
 });
 
 test('ordinary public image hosts are still allowed', () => {
-  for (const allowed of ['93.184.216.34', '8.8.8.8', '172.32.0.1', '169.253.0.1', '2606:2800:220:1::1']) {
+  for (const allowed of [
+    '93.184.216.34', '8.8.8.8', '172.32.0.1', '169.253.0.1',
+    '2606:2800:220:1::1', '2001:4860:4860::8888', '::ffff:8.8.8.8', '::ffff:808:808',
+  ]) {
     assert.equal(isPrivateAddress(allowed), false, `${allowed} must be allowed`);
   }
 });
