@@ -50,7 +50,8 @@ JSON, so you can read it, diff it, or keep it in git.
 
 ## Development
 
-No dependencies and no build — Node 24 runs the TypeScript directly.
+No dependencies and no build — Node 24 runs the TypeScript directly. From a repo
+checkout — `install-local.ts` is not part of the published skill:
 
 ```sh
 just test                         # the suite

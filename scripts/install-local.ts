@@ -20,6 +20,22 @@ const APP_SUPPORT = path.join(os.homedir(), 'Library', 'Application Support', BU
 const TOKEN_PATH = path.join(APP_SUPPORT, 'agent-runtime', 'secrets', 'plow-local-token');
 
 /**
+ * What `clawhub publish` leaves out, so a dev install ships exactly what users
+ * receive. Keeping a second exclude list here is how the two paths drift — and
+ * a stale entry excludes nothing silently, so an unresolvable one is fatal.
+ */
+function publishExcludes(): string[] {
+  const patterns = fs
+    .readFileSync(path.join(BUNDLE_ROOT, '.clawhubignore'), 'utf8')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('#'));
+  const missing = patterns.filter((p) => !fs.existsSync(path.join(BUNDLE_ROOT, p)));
+  if (missing.length) throw new Error(`.clawhubignore names paths that no longer exist: ${missing.join(', ')}`);
+  return patterns;
+}
+
+/**
  * plowd's HTTP port is assigned dynamically. 18788 is the in-VM agent->plowd
  * callback port, not this one — hardcoding it points at the wrong daemon.
  */
@@ -70,6 +86,7 @@ async function main(): Promise<void> {
       '--exclude', '.git',
       '--exclude', 'docs',
       '--exclude', '.DS_Store',
+      ...publishExcludes().flatMap((p) => ['--exclude', `${path.basename(BUNDLE_ROOT)}/${p}`]),
       path.basename(BUNDLE_ROOT),
     ],
     { encoding: 'buffer', maxBuffer: 64 * 1024 * 1024 },
