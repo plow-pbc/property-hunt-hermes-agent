@@ -137,14 +137,19 @@ test('scraping into an uninitialized folder costs nothing and says what to do', 
 test('a refresh keeps only the enrichment this run failed to produce', () => {
   const build = (lat: number | null, lng: number | null, photo: string | null) =>
     ({ lat, lng, photo }) as Scraped;
+  // Photo carry-forward is filesystem-backed and has its own test below; this
+  // matrix covers the coordinate contract, so an empty dir is the right input.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'property-hunt-coords-'));
 
   for (const { name, fresh, previous, kept, expected } of [
     {
-      name: 'transient geocoder/image failure keeps what the last run found',
+      name: 'a transient geocoder failure keeps the last known coordinates',
       fresh: build(null, null, null),
       previous: build(37.745, -122.432, 'photos/x.jpg'),
-      kept: ['coordinates', 'photo'],
-      expected: [37.745, -122.432, 'photos/x.jpg'],
+      // Photo is absent from this dir, so it is correctly not carried — the
+      // filesystem-backed case has its own test.
+      kept: ['coordinates'],
+      expected: [37.745, -122.432, null],
     },
     {
       name: 'a successful refresh still overwrites',
@@ -161,7 +166,7 @@ test('a refresh keeps only the enrichment this run failed to produce', () => {
       expected: [null, null, null],
     },
   ]) {
-    assert.deepEqual(keepPreviousEnrichment(fresh, previous), kept, name);
+    assert.deepEqual(keepPreviousEnrichment(fresh, previous, dir), kept, name);
     assert.deepEqual([fresh.lat, fresh.lng, fresh.photo], expected, name);
   }
 });

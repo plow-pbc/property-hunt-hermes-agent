@@ -313,7 +313,7 @@ async function downloadPhoto(photoUrl: string, dir: string, id: string): Promise
 export function keepPreviousEnrichment(
   scraped: Scraped,
   previous: Scraped | undefined,
-  dir?: string,
+  dir: string,
 ): string[] {
   if (!previous) return [];
   const kept: string[] = [];
@@ -325,8 +325,7 @@ export function keepPreviousEnrichment(
   // Only carry a photo whose file is still there. Keeping the path blind would
   // paper over a failed download with a record pointing at nothing, which the
   // map renders as a broken image — worse than the honest plain marker.
-  const photoOnDisk =
-    previous.photo !== null && (dir === undefined || fs.existsSync(path.join(dir, previous.photo)));
+  const photoOnDisk = previous.photo !== null && fs.existsSync(path.join(dir, previous.photo));
   if (scraped.photo === null && photoOnDisk) {
     scraped.photo = previous.photo;
     kept.push('photo');
