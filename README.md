@@ -23,11 +23,12 @@ No server. No API key. No account. No build step. Open the HTML file from Finder
 and it works — the map is [Leaflet](https://leafletjs.com), bundled, and your
 data is a plain JSON file the page loads directly.
 
-Three things do go out over the network, and nothing else: the listing lookup
-itself, [OpenStreetMap](https://www.openstreetmap.org/copyright) map tiles
-fetched while you have the map open, and one
-[Nominatim](https://nominatim.org) geocoding request per property to turn its
-address into a pin. Your notes and ratings never leave your Mac.
+Four things do go out over the network, and nothing else: the listing lookup
+itself, one download of that listing's photo from whatever host it lives on,
+one [Nominatim](https://nominatim.org) geocoding request per property to turn
+its address into a pin, and [OpenStreetMap](https://www.openstreetmap.org/copyright)
+map tiles fetched while you have the map open. Your notes and ratings never
+leave your Mac.
 
 ## Requirements
 
