@@ -153,8 +153,18 @@ export function dataFile(dir: string): string {
   return path.join(dir, 'data.js');
 }
 
+/**
+ * The one way to read the store, and the one place that says what to do when
+ * there isn't one. Callers that need to fail before doing expensive work just
+ * call this early — an existence-only preflight would let a *damaged* store
+ * through and spend the browser run before failing anyway.
+ */
 export function readStore(dir: string): Property[] {
-  return parseStore(fs.readFileSync(dataFile(dir), 'utf8'));
+  const file = dataFile(dir);
+  if (!fs.existsSync(file)) {
+    throw new Error(`no store at ${dir} — run "node properties.ts init" first`);
+  }
+  return parseStore(fs.readFileSync(file, 'utf8'));
 }
 
 /**

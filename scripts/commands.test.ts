@@ -4,11 +4,9 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// Three review rounds went to the same defect wearing different masks: a
-// user-facing string that names one of these scripts but isn't runnable as
-// written (missing `node`) or quotes a value in a way an apostrophe breaks.
-// Fixing each site as it was cited just relocated the bug. This pins the
-// invariant instead, so the class can't come back.
+// Several review rounds went to one defect: a user-facing string naming one of
+// these scripts that isn't runnable as printed. Fixing each site as it was
+// cited just relocated it, so the invariant is pinned here instead.
 
 const SCRIPTS = fileURLToPath(new URL('.', import.meta.url));
 const BUNDLE = path.dirname(SCRIPTS);
@@ -73,16 +71,4 @@ test('every command we print is runnable as printed', () => {
     }
   }
   assert.deepEqual(offenders, [], `these name a script without "node ", so they don't run as printed`);
-});
-
-test('no printed command single-quotes a value an apostrophe would break', () => {
-  // `--scraped '<json>'` was the original sin: a scraped record carries an
-  // address, and 1200 O'Farrell St is an ordinary San Francisco one.
-  const offenders: string[] = [];
-  for (const { name, text, lineOffset = 0 } of SOURCES) {
-    for (const { n, line } of instructionLines(text)) {
-      if (/--scraped\s+'/.test(line)) offenders.push(`${name}:${n + lineOffset} — "${line.trim()}"`);
-    }
-  }
-  assert.deepEqual(offenders, [], 'single-quoted JSON breaks on any address containing an apostrophe');
 });

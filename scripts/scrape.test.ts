@@ -7,7 +7,8 @@ import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import { scrapeRendered } from './scrape.ts';
+import { keepPreviousEnrichment, scrapeRendered } from './scrape.ts';
+import type { Scraped } from './store.ts';
 
 // A stand-in for the Camoufox proxy. Only `goto` and `eval` are used, and
 // `eval` is dispatched on which surface the caller asked for — so a page can be
@@ -126,4 +127,32 @@ test('scraping into an uninitialized folder costs nothing and says what to do', 
   assert.match(payload.error, /no store at/);
   assert.match(payload.error, /node properties\.ts init/, 'the message has to say what to run');
   assert.deepEqual(fs.readdirSync(dir), [], 'nothing may be written before the store is known to exist');
+});
+
+test('a transient enrichment failure does not erase what we already knew', () => {
+  // A routine price-check refresh replaces `scraped` wholesale. If Nominatim
+  // rate-limits us or the image host 500s that run, the property would lose the
+  // pin and photo a previous run had already found.
+  const previous = { lat: 37.745, lng: -122.432, photo: 'photos/x.jpg' } as Scraped;
+  const fresh = { lat: null, lng: null, photo: null } as unknown as Scraped;
+
+  assert.deepEqual(keepPreviousEnrichment(fresh, previous), ['coordinates', 'photo']);
+  assert.equal(fresh.lat, 37.745);
+  assert.equal(fresh.lng, -122.432);
+  assert.equal(fresh.photo, 'photos/x.jpg');
+});
+
+test('a successful refresh still overwrites with the new values', () => {
+  const previous = { lat: 1, lng: 2, photo: 'photos/old.jpg' } as Scraped;
+  const fresh = { lat: 9, lng: 8, photo: 'photos/new.jpg' } as Scraped;
+
+  assert.deepEqual(keepPreviousEnrichment(fresh, previous), [], 'nothing failed, so nothing is kept');
+  assert.equal(fresh.lat, 9);
+  assert.equal(fresh.photo, 'photos/new.jpg');
+});
+
+test('a brand-new property has nothing to carry forward', () => {
+  const fresh = { lat: null, lng: null, photo: null } as unknown as Scraped;
+  assert.deepEqual(keepPreviousEnrichment(fresh, undefined), []);
+  assert.equal(fresh.lat, null, 'still legitimately unmapped');
 });

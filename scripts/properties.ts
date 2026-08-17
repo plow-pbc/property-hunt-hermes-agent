@@ -23,26 +23,13 @@ const USAGE = `property-hunt store
   rm <id>                           delete the property and its photo
   where                             print the folder being used
 
-Adding or refreshing a property writes the store on its own:
-  node scrape.ts '<listing-url>'
+Adding and refreshing a property is a separate command — see SKILL.md.
 
 The data folder is $PROPERTY_HUNT_DIR, else /workspace/host/properties inside
 the agent VM, else ~/Plow/properties on a Mac.
 
 A single-quoted value cannot contain an apostrophe, and notes do ("don't love
 the kitchen"). Replace each ' with '\\'' before quoting.`;
-
-/**
- * Fail with the one message that says what to do. scrape.ts calls this before
- * it opens a browser: without it, an un-inited folder surfaces a bare ENOENT
- * from readStore *after* the scrape, geocode, and photo download have already
- * run — leaving an orphaned image behind and telling the agent nothing.
- */
-export function requireStore(dir: string): void {
-  if (!fs.existsSync(path.join(dir, 'data.js'))) {
-    throw new Error(`no store at ${dir} — run "node properties.ts init" first`);
-  }
-}
 
 /**
  * Resolve the data folder. The same code runs inside the agent container and on
@@ -126,7 +113,6 @@ function main(argv: string[]): void {
     return;
   }
 
-  requireStore(dir);
   const rows = readStore(dir);
 
   switch (verb) {

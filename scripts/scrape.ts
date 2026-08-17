@@ -13,7 +13,7 @@ import { extractScraped, geocodeQuery } from './extract.ts';
 import type { PageSurfaces } from './extract.ts';
 import { coerceScraped, readStore, slugify, upsertScraped, writeStore } from './store.ts';
 import type { Scraped } from './store.ts';
-import { requireStore, resolveDataDir } from './properties.ts';
+import { resolveDataDir } from './properties.ts';
 
 const require = createRequire(import.meta.url);
 
@@ -134,6 +134,27 @@ async function downloadPhoto(photoUrl: string, dir: string, id: string): Promise
   return relative;
 }
 
+/**
+ * A refresh replaces `scraped` wholesale, so a transient geocoder outage or a
+ * dead image host would blank a pin or photo we already had — losing data on
+ * what is meant to be a routine price check. Enrichment that failed this run
+ * keeps whatever the last successful run found. Returns what was kept.
+ */
+export function keepPreviousEnrichment(scraped: Scraped, previous: Scraped | undefined): string[] {
+  if (!previous) return [];
+  const kept: string[] = [];
+  if (scraped.lat === null && previous.lat !== null) {
+    scraped.lat = previous.lat;
+    scraped.lng = previous.lng;
+    kept.push('coordinates');
+  }
+  if (scraped.photo === null && previous.photo !== null) {
+    scraped.photo = previous.photo;
+    kept.push('photo');
+  }
+  return kept;
+}
+
 async function main(): Promise<void> {
   const url = process.argv[2];
   if (!url || !/^https?:\/\//i.test(url)) {
@@ -141,11 +162,12 @@ async function main(): Promise<void> {
     return;
   }
 
-  // Cheapest check first, and before anything is written: without it an
-  // un-inited folder fails at readStore *after* the browser run, the geocode,
-  // and downloadPhoto has already created photos/ and an orphaned image.
+  // Read before opening the browser. This is the guard: a missing or damaged
+  // store fails here with an actionable message, rather than after the scrape,
+  // the geocode, and a photo download that has already written an image.
+  // It also gives us what this property looked like before the refresh.
   const dir = resolveDataDir();
-  requireStore(dir);
+  const before = readStore(dir);
 
   const { connect } = require('plow-browser');
   let browser: any;
@@ -183,10 +205,12 @@ async function main(): Promise<void> {
     }
   }
 
-  // Save directly rather than printing JSON for a second command to re-parse.
-  // That round trip was the whole reason a listing's text ever passed through a
-  // shell, which is what made quoting a recurring defect — an address like
-  // 1200 O'Farrell St breaks any single-quoted form of it.
+  for (const field of keepPreviousEnrichment(scraped, before.find((row) => row.id === id)?.scraped)) {
+    note(`kept the previous ${field} for ${id}`);
+  }
+
+  // Re-read at write time: the scrape can take a minute, and the store may have
+  // been edited in that window.
   const rows = readStore(dir);
   const next = upsertScraped(rows, scraped);
   writeStore(dir, next);
