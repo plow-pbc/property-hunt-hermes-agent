@@ -6,6 +6,8 @@
 // standards-based surfaces, geocodes the address, and downloads the hero photo.
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import * as net from 'node:net';
+import * as dns from 'node:dns/promises';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 
@@ -19,6 +21,7 @@ const require = createRequire(import.meta.url);
 
 const RENDER_TIMEOUT_MS = 45_000;
 const POLL_INTERVAL_MS = 750;
+const MAX_PHOTO_REDIRECTS = 3;
 const NOMINATIM = 'https://nominatim.openstreetmap.org/search';
 // Nominatim's usage policy requires a descriptive agent identifying the app.
 const USER_AGENT = 'property-hunt/0.1 (personal property tracker; https://clawhub.ai)';
@@ -117,8 +120,67 @@ async function geocode(scraped: Scraped): Promise<{ lat: number; lng: number } |
   return { lat: Number(hits[0].lat), lng: Number(hits[0].lon) };
 }
 
+/**
+ * Is this address one we must never issue a request to?
+ *
+ * The hero-image URL comes from the listing page's own JSON-LD or og:image, so
+ * it is attacker-controlled text. Without this, a hostile listing could point
+ * og:image at 127.0.0.1 or a RFC1918 host and use us as a blind probe into
+ * whatever the agent container can reach.
+ */
+export function isPrivateAddress(ip: string): boolean {
+  if (net.isIPv4(ip)) {
+    const [a, b] = ip.split('.').map(Number);
+    if (a === 0 || a === 127 || a === 10) return true;
+    if (a === 169 && b === 254) return true; // link-local, incl. cloud metadata
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 100 && b >= 64 && b <= 127) return true; // carrier-grade NAT
+    return a >= 224; // multicast and reserved
+  }
+  const ipv6 = ip.toLowerCase().replace(/^\[|\]$/g, '');
+  if (ipv6 === '::1' || ipv6 === '::') return true;
+  if (/^(fc|fd|fe80|ff)/.test(ipv6)) return true;
+  // ::ffff:127.0.0.1 and friends — judge the embedded v4 address.
+  const embedded = ipv6.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  return embedded ? isPrivateAddress(embedded[1]) : false;
+}
+
+/**
+ * Resolve and vet a destination before fetching it. Not proof against DNS
+ * rebinding — the name could resolve differently between this check and the
+ * connect — but it stops the realistic attack, which is a listing page simply
+ * naming an internal host or address.
+ */
+export async function assertPublicDestination(raw: string, base?: URL): Promise<URL> {
+  const url = new URL(raw, base);
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error(`refusing a ${url.protocol} image URL`);
+  }
+  const literal = url.hostname.replace(/^\[|\]$/g, '');
+  const addresses = net.isIP(literal)
+    ? [literal]
+    : (await dns.lookup(url.hostname, { all: true })).map((entry) => entry.address);
+  if (addresses.length === 0 || addresses.some(isPrivateAddress)) {
+    throw new Error(`refusing a request to a non-public address (${url.hostname})`);
+  }
+  return url;
+}
+
 async function downloadPhoto(photoUrl: string, dir: string, id: string): Promise<string> {
-  const response = await fetch(photoUrl, { headers: { 'User-Agent': USER_AGENT } });
+  // Follow redirects by hand so every hop is vetted, not just the first — a
+  // public URL that 302s to 127.0.0.1 would otherwise walk straight through.
+  let target = await assertPublicDestination(photoUrl);
+  let response: Response | undefined;
+  for (let hop = 0; hop <= MAX_PHOTO_REDIRECTS; hop++) {
+    response = await fetch(target, { headers: { 'User-Agent': USER_AGENT }, redirect: 'manual' });
+    if (response.status < 300 || response.status >= 400) break;
+    const location = response.headers.get('location');
+    if (!location) throw new Error(`HTTP ${response.status} with no redirect target`);
+    target = await assertPublicDestination(location, target);
+    response = undefined;
+  }
+  if (!response) throw new Error(`too many redirects (over ${MAX_PHOTO_REDIRECTS})`);
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const type = response.headers.get('content-type') ?? '';
   if (!type.startsWith('image/')) throw new Error(`not an image (${type || 'no content-type'})`);
@@ -209,12 +271,9 @@ async function main(): Promise<void> {
     note(`kept the previous ${field} for ${id}`);
   }
 
-  // Re-read at write time: the scrape can take a minute, and the store may have
-  // been edited in that window.
-  const rows = readStore(dir);
-  const next = upsertScraped(rows, scraped);
+  const next = upsertScraped(before, scraped);
   writeStore(dir, next);
-  process.stdout.write(`${next.length > rows.length ? 'added' : 'refreshed'} ${id}\n`);
+  process.stdout.write(`${next.length > before.length ? 'added' : 'refreshed'} ${id}\n`);
 }
 
 // Only run when invoked directly, so tests can import scrapeRendered.

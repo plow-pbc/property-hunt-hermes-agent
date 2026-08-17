@@ -7,7 +7,12 @@ import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import { keepPreviousEnrichment, scrapeRendered } from './scrape.ts';
+import {
+  assertPublicDestination,
+  isPrivateAddress,
+  keepPreviousEnrichment,
+  scrapeRendered,
+} from './scrape.ts';
 import type { Scraped } from './store.ts';
 
 // A stand-in for the Camoufox proxy. Only `goto` and `eval` are used, and
@@ -125,34 +130,74 @@ test('scraping into an uninitialized folder costs nothing and says what to do', 
   const payload = JSON.parse(out.trim());
   assert.equal(payload.type, 'tool_error');
   assert.match(payload.error, /no store at/);
-  assert.match(payload.error, /node properties\.ts init/, 'the message has to say what to run');
+  assert.match(payload.error, /SKILL\.md/, 'points at the canonical init command rather than a cwd-relative one');
   assert.deepEqual(fs.readdirSync(dir), [], 'nothing may be written before the store is known to exist');
 });
 
-test('a transient enrichment failure does not erase what we already knew', () => {
-  // A routine price-check refresh replaces `scraped` wholesale. If Nominatim
-  // rate-limits us or the image host 500s that run, the property would lose the
-  // pin and photo a previous run had already found.
-  const previous = { lat: 37.745, lng: -122.432, photo: 'photos/x.jpg' } as Scraped;
-  const fresh = { lat: null, lng: null, photo: null } as unknown as Scraped;
+test('a refresh keeps only the enrichment this run failed to produce', () => {
+  const build = (lat: number | null, lng: number | null, photo: string | null) =>
+    ({ lat, lng, photo }) as Scraped;
 
-  assert.deepEqual(keepPreviousEnrichment(fresh, previous), ['coordinates', 'photo']);
-  assert.equal(fresh.lat, 37.745);
-  assert.equal(fresh.lng, -122.432);
-  assert.equal(fresh.photo, 'photos/x.jpg');
+  for (const { name, fresh, previous, kept, expected } of [
+    {
+      name: 'transient geocoder/image failure keeps what the last run found',
+      fresh: build(null, null, null),
+      previous: build(37.745, -122.432, 'photos/x.jpg'),
+      kept: ['coordinates', 'photo'],
+      expected: [37.745, -122.432, 'photos/x.jpg'],
+    },
+    {
+      name: 'a successful refresh still overwrites',
+      fresh: build(9, 8, 'photos/new.jpg'),
+      previous: build(1, 2, 'photos/old.jpg'),
+      kept: [],
+      expected: [9, 8, 'photos/new.jpg'],
+    },
+    {
+      name: 'a new property has nothing to carry forward',
+      fresh: build(null, null, null),
+      previous: undefined,
+      kept: [],
+      expected: [null, null, null],
+    },
+  ]) {
+    assert.deepEqual(keepPreviousEnrichment(fresh, previous), kept, name);
+    assert.deepEqual([fresh.lat, fresh.lng, fresh.photo], expected, name);
+  }
 });
 
-test('a successful refresh still overwrites with the new values', () => {
-  const previous = { lat: 1, lng: 2, photo: 'photos/old.jpg' } as Scraped;
-  const fresh = { lat: 9, lng: 8, photo: 'photos/new.jpg' } as Scraped;
+// --- The image URL comes from the listing page, so it is attacker input ------
 
-  assert.deepEqual(keepPreviousEnrichment(fresh, previous), [], 'nothing failed, so nothing is kept');
-  assert.equal(fresh.lat, 9);
-  assert.equal(fresh.photo, 'photos/new.jpg');
+test('a listing cannot aim the photo fetch at the network behind us', () => {
+  for (const blocked of [
+    '127.0.0.1', '127.1.2.3', '0.0.0.0', '10.0.0.5', '172.16.9.9', '172.31.255.1',
+    '192.168.1.1', '169.254.169.254', '100.64.0.1', '224.0.0.1',
+    '::1', '::', 'fc00::1', 'fd12::3', 'fe80::1', '::ffff:127.0.0.1',
+  ]) {
+    assert.equal(isPrivateAddress(blocked), true, `${blocked} must be refused`);
+  }
 });
 
-test('a brand-new property has nothing to carry forward', () => {
-  const fresh = { lat: null, lng: null, photo: null } as unknown as Scraped;
-  assert.deepEqual(keepPreviousEnrichment(fresh, undefined), []);
-  assert.equal(fresh.lat, null, 'still legitimately unmapped');
+test('ordinary public image hosts are still allowed', () => {
+  for (const allowed of ['93.184.216.34', '8.8.8.8', '172.32.0.1', '169.253.0.1', '2606:2800:220:1::1']) {
+    assert.equal(isPrivateAddress(allowed), false, `${allowed} must be allowed`);
+  }
+});
+
+test('a hostname that resolves inward is refused, not just a literal IP', async () => {
+  // The realistic payload is a *name* — "localhost", or an attacker domain with
+  // an A record pointing at 127.0.0.1 — so the guard has to resolve, not just
+  // pattern-match the URL text.
+  await assert.rejects(() => assertPublicDestination('http://localhost/x.jpg'), /non-public address/);
+  await assert.rejects(() => assertPublicDestination('http://127.0.0.1:9222/x.jpg'), /non-public address/);
+  await assert.rejects(() => assertPublicDestination('file:///etc/passwd'), /refusing a file: image URL/);
+});
+
+test('a redirect target is vetted against the same rule as the first hop', async () => {
+  // downloadPhoto resolves each Location through this same function, so a
+  // public URL that 302s inward is caught on the hop, not waved through.
+  await assert.rejects(
+    () => assertPublicDestination('/internal', new URL('http://localhost/start')),
+    /non-public address/,
+  );
 });

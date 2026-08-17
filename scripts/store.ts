@@ -162,7 +162,10 @@ export function dataFile(dir: string): string {
 export function readStore(dir: string): Property[] {
   const file = dataFile(dir);
   if (!fs.existsSync(file)) {
-    throw new Error(`no store at ${dir} — run "node properties.ts init" first`);
+    // Deliberately not a command: the caller's cwd is unknown, and a
+    // cwd-relative "node properties.ts init" fails with MODULE_NOT_FOUND from
+    // anywhere but scripts/. SKILL.md carries the absolute invocation.
+    throw new Error(`no store at ${dir} — run the "First, always" init command in SKILL.md first`);
   }
   return parseStore(fs.readFileSync(file, 'utf8'));
 }
