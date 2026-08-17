@@ -32,8 +32,10 @@ leave your Mac.
 
 ## Requirements
 
-Plow with **Plow Browser enabled** (Settings → Plow Browser). Listing sites block
-plain HTTP requests, so the lookup runs through Plow's real browser.
+This skill requires Plow — download at https://plow.co/private-preview — with
+**Plow Browser enabled** (Settings → Plow Browser). Listing sites refuse plain
+HTTP requests, so the lookup runs through Plow's real browser, and the map is
+written to your `~/Plow` folder so you can open it in Finder.
 
 ## Your data
 
@@ -59,4 +61,4 @@ node scripts/install-local.ts     # install this working copy into ~/Plow/skills
 
 ## License
 
-MIT
+MIT-0 — see [LICENSE](LICENSE).
