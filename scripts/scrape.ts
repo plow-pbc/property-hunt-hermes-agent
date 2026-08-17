@@ -8,6 +8,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as net from 'node:net';
 import * as dns from 'node:dns/promises';
+import * as http from 'node:http';
+import * as https from 'node:https';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 
@@ -22,6 +24,8 @@ const require = createRequire(import.meta.url);
 const RENDER_TIMEOUT_MS = 45_000;
 const POLL_INTERVAL_MS = 750;
 const MAX_PHOTO_REDIRECTS = 3;
+const MAX_PHOTO_BYTES = 20 * 1024 * 1024;
+const PHOTO_TIMEOUT_MS = 20_000;
 const NOMINATIM = 'https://nominatim.openstreetmap.org/search';
 // Nominatim's usage policy requires a descriptive agent identifying the app.
 const USER_AGENT = 'property-hunt/0.1 (personal property tracker; https://clawhub.ai)';
@@ -189,51 +193,113 @@ function ipv6Bytes(ip: string): number[] | null {
 }
 
 /**
- * Resolve and vet a destination before fetching it. Not proof against DNS
- * rebinding — the name could resolve differently between this check and the
- * connect — but it stops the realistic attack, which is a listing page simply
- * naming an internal host or address.
+ * Resolve a destination once and return the exact address we vetted.
+ *
+ * Returning the address is the whole point. Validating a *name* and then
+ * letting the HTTP client resolve it again is two lookups, and an attacker who
+ * controls the domain can answer them differently — public for the check,
+ * loopback for the connect. The caller pins to this address, so there is only
+ * ever one resolution to poison.
  */
-export async function assertPublicDestination(raw: string, base?: URL): Promise<URL> {
+export async function resolvePublicDestination(
+  raw: string,
+  base?: URL,
+): Promise<{ url: URL; address: string; family: number }> {
   const url = new URL(raw, base);
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     throw new Error(`refusing a ${url.protocol} image URL`);
   }
   const literal = url.hostname.replace(/^\[|\]$/g, '');
-  const addresses = net.isIP(literal)
-    ? [literal]
-    : (await dns.lookup(url.hostname, { all: true })).map((entry) => entry.address);
-  if (addresses.length === 0 || addresses.some(isPrivateAddress)) {
+  const resolved = net.isIP(literal)
+    ? [{ address: literal, family: net.isIP(literal) }]
+    : await dns.lookup(url.hostname, { all: true });
+
+  if (resolved.length === 0) throw new Error(`could not resolve ${url.hostname}`);
+  // Every answer must be public: accepting the name because *one* record is
+  // public would let an attacker mix in a decoy and still win on the rest.
+  if (resolved.some((entry) => isPrivateAddress(entry.address))) {
     throw new Error(`refusing a request to a non-public address (${url.hostname})`);
   }
-  return url;
+  return { url, address: resolved[0].address, family: resolved[0].family };
+}
+
+/**
+ * GET the vetted address, keeping the URL's Host header and TLS servername so
+ * pinning breaks neither virtual hosting nor certificate validation.
+ */
+function getPinned(
+  url: URL,
+  address: string,
+  family: number,
+): Promise<{ status: number; location: string | null; type: string; body: Buffer }> {
+  const client = url.protocol === 'https:' ? https : http;
+  return new Promise((resolve, reject) => {
+    const request = client.get(
+      url,
+      {
+        headers: { 'User-Agent': USER_AGENT },
+        // Connect to the address already vetted, not to whatever the name
+        // resolves to on a second lookup. Node's happy-eyeballs path calls
+        // lookup with { all: true } and expects an array — answering only the
+        // single-address form yields "Invalid IP address: undefined".
+        lookup: (_host: string, opts: { all?: boolean }, done: Function) =>
+          opts?.all ? done(null, [{ address, family }]) : done(null, address, family),
+        servername: url.hostname.replace(/^\[|\]$/g, ''),
+      } as never,
+      (response) => {
+        const chunks: Buffer[] = [];
+        let bytes = 0;
+        response.on('data', (chunk: Buffer) => {
+          bytes += chunk.length;
+          if (bytes > MAX_PHOTO_BYTES) {
+            request.destroy();
+            reject(new Error(`image exceeds ${MAX_PHOTO_BYTES / 1024 / 1024} MB`));
+            return;
+          }
+          chunks.push(chunk);
+        });
+        response.on('end', () =>
+          resolve({
+            status: response.statusCode ?? 0,
+            location: (response.headers.location as string | undefined) ?? null,
+            type: (response.headers['content-type'] as string | undefined) ?? '',
+            body: Buffer.concat(chunks),
+          }),
+        );
+        response.on('error', reject);
+      },
+    );
+    request.on('error', reject);
+    request.setTimeout(PHOTO_TIMEOUT_MS, () => request.destroy(new Error('image request timed out')));
+  });
 }
 
 async function downloadPhoto(photoUrl: string, dir: string, id: string): Promise<string> {
-  // Follow redirects by hand so every hop is vetted, not just the first — a
-  // public URL that 302s to 127.0.0.1 would otherwise walk straight through.
-  let target = await assertPublicDestination(photoUrl);
-  let response: Response | undefined;
-  for (let hop = 0; hop <= MAX_PHOTO_REDIRECTS; hop++) {
-    response = await fetch(target, { headers: { 'User-Agent': USER_AGENT }, redirect: 'manual' });
-    if (response.status < 300 || response.status >= 400) break;
-    const location = response.headers.get('location');
-    if (!location) throw new Error(`HTTP ${response.status} with no redirect target`);
-    target = await assertPublicDestination(location, target);
-    response = undefined;
-  }
-  if (!response) throw new Error(`too many redirects (over ${MAX_PHOTO_REDIRECTS})`);
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  const type = response.headers.get('content-type') ?? '';
-  if (!type.startsWith('image/')) throw new Error(`not an image (${type || 'no content-type'})`);
+  // Every hop is resolved and vetted, then connected to by address — a public
+  // URL that 302s inward, or a name that rebinds between check and connect,
+  // both fail here rather than reaching the network behind us.
+  let hop = await resolvePublicDestination(photoUrl);
+  let response = await getPinned(hop.url, hop.address, hop.family);
 
-  const ext = type.includes('png') ? '.png' : type.includes('webp') ? '.webp' : '.jpg';
+  for (let redirects = 0; response.status >= 300 && response.status < 400; redirects += 1) {
+    if (redirects >= MAX_PHOTO_REDIRECTS) throw new Error(`too many redirects (over ${MAX_PHOTO_REDIRECTS})`);
+    if (!response.location) throw new Error(`HTTP ${response.status} with no redirect target`);
+    hop = await resolvePublicDestination(response.location, hop.url);
+    response = await getPinned(hop.url, hop.address, hop.family);
+  }
+
+  if (response.status < 200 || response.status >= 300) throw new Error(`HTTP ${response.status}`);
+  if (!response.type.startsWith('image/')) {
+    throw new Error(`not an image (${response.type || 'no content-type'})`);
+  }
+
+  const ext = response.type.includes('png') ? '.png' : response.type.includes('webp') ? '.webp' : '.jpg';
   const relative = path.join('photos', `${id}${ext}`);
   const destination = path.join(dir, relative);
   fs.mkdirSync(path.dirname(destination), { recursive: true });
   // Same atomic discipline as the store: the page may be open on this file.
   const tmp = `${destination}.tmp-${process.pid}`;
-  fs.writeFileSync(tmp, Buffer.from(await response.arrayBuffer()));
+  fs.writeFileSync(tmp, response.body);
   fs.renameSync(tmp, destination);
   return relative;
 }
@@ -244,7 +310,11 @@ async function downloadPhoto(photoUrl: string, dir: string, id: string): Promise
  * what is meant to be a routine price check. Enrichment that failed this run
  * keeps whatever the last successful run found. Returns what was kept.
  */
-export function keepPreviousEnrichment(scraped: Scraped, previous: Scraped | undefined): string[] {
+export function keepPreviousEnrichment(
+  scraped: Scraped,
+  previous: Scraped | undefined,
+  dir?: string,
+): string[] {
   if (!previous) return [];
   const kept: string[] = [];
   if (scraped.lat === null && previous.lat !== null) {
@@ -252,7 +322,12 @@ export function keepPreviousEnrichment(scraped: Scraped, previous: Scraped | und
     scraped.lng = previous.lng;
     kept.push('coordinates');
   }
-  if (scraped.photo === null && previous.photo !== null) {
+  // Only carry a photo whose file is still there. Keeping the path blind would
+  // paper over a failed download with a record pointing at nothing, which the
+  // map renders as a broken image — worse than the honest plain marker.
+  const photoOnDisk =
+    previous.photo !== null && (dir === undefined || fs.existsSync(path.join(dir, previous.photo)));
+  if (scraped.photo === null && photoOnDisk) {
     scraped.photo = previous.photo;
     kept.push('photo');
   }
@@ -309,7 +384,7 @@ async function main(): Promise<void> {
     }
   }
 
-  for (const field of keepPreviousEnrichment(scraped, before.find((row) => row.id === id)?.scraped)) {
+  for (const field of keepPreviousEnrichment(scraped, before.find((row) => row.id === id)?.scraped, dir)) {
     note(`kept the previous ${field} for ${id}`);
   }
 

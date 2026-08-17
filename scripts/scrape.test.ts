@@ -8,9 +8,9 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import {
-  assertPublicDestination,
   isPrivateAddress,
   keepPreviousEnrichment,
+  resolvePublicDestination,
   scrapeRendered,
 } from './scrape.ts';
 import type { Scraped } from './store.ts';
@@ -168,48 +168,74 @@ test('a refresh keeps only the enrichment this run failed to produce', () => {
 
 // --- The image URL comes from the listing page, so it is attacker input ------
 
-test('a listing cannot aim the photo fetch at the network behind us', () => {
-  for (const blocked of [
-    '127.0.0.1', '127.1.2.3', '0.0.0.0', '10.0.0.5', '172.16.9.9', '172.31.255.1',
-    '192.168.1.1', '169.254.169.254', '100.64.0.1', '224.0.0.1',
-    '::1', '::', 'fc00::1', 'fd12::3', 'fe80::1', '::ffff:127.0.0.1',
-    // The spellings the first version of this guard let through: one address
-    // has many texts, so these are judged by value, not by pattern.
-    '::ffff:7f00:1',      // hex spelling of ::ffff:127.0.0.1
-    '::ffff:0:7f00:1',    // v4-translated
-    '64:ff9b::7f00:1',    // NAT64
-    '::ffff:a00:1',       // 10.0.0.1, hex
-    'fe90::1',            // fe80::/10, not just fe80::/16
-    'feb0::1',
-    '[::1]',              // bracketed, as a URL hostname arrives
+test('photo addresses are classified by routability, not by spelling', () => {
+  for (const { expected, addresses } of [
+    {
+      expected: true,
+      addresses: [
+        '127.0.0.1', '127.1.2.3', '0.0.0.0', '10.0.0.5', '172.16.9.9', '172.31.255.1',
+        '192.168.1.1', '169.254.169.254', '100.64.0.1', '224.0.0.1',
+        '::1', '::', 'fc00::1', 'fd12::3', 'fe80::1', '[::1]',
+        // Spellings the first version of this guard let through — one address
+        // has many texts, so these are judged by value.
+        '::ffff:127.0.0.1', '::ffff:7f00:1', '::ffff:0:7f00:1', '64:ff9b::7f00:1',
+        '::ffff:a00:1', 'fe90::1', 'feb0::1',
+      ],
+    },
+    {
+      expected: false,
+      addresses: [
+        '93.184.216.34', '8.8.8.8', '172.32.0.1', '169.253.0.1',
+        '2606:2800:220:1::1', '2001:4860:4860::8888', '::ffff:8.8.8.8', '::ffff:808:808',
+      ],
+    },
   ]) {
-    assert.equal(isPrivateAddress(blocked), true, `${blocked} must be refused`);
-  }
-});
-
-test('ordinary public image hosts are still allowed', () => {
-  for (const allowed of [
-    '93.184.216.34', '8.8.8.8', '172.32.0.1', '169.253.0.1',
-    '2606:2800:220:1::1', '2001:4860:4860::8888', '::ffff:8.8.8.8', '::ffff:808:808',
-  ]) {
-    assert.equal(isPrivateAddress(allowed), false, `${allowed} must be allowed`);
+    for (const address of addresses) {
+      assert.equal(isPrivateAddress(address), expected, `${address} should be ${expected ? 'refused' : 'allowed'}`);
+    }
   }
 });
 
 test('a hostname that resolves inward is refused, not just a literal IP', async () => {
-  // The realistic payload is a *name* — "localhost", or an attacker domain with
-  // an A record pointing at 127.0.0.1 — so the guard has to resolve, not just
-  // pattern-match the URL text.
-  await assert.rejects(() => assertPublicDestination('http://localhost/x.jpg'), /non-public address/);
-  await assert.rejects(() => assertPublicDestination('http://127.0.0.1:9222/x.jpg'), /non-public address/);
-  await assert.rejects(() => assertPublicDestination('file:///etc/passwd'), /refusing a file: image URL/);
+  // The realistic payload is a *name* — "localhost", or an attacker domain
+  // whose A record points at 127.0.0.1 — so the guard resolves rather than
+  // pattern-matching the URL text.
+  await assert.rejects(() => resolvePublicDestination('http://localhost/x.jpg'), /non-public address/);
+  await assert.rejects(() => resolvePublicDestination('http://127.0.0.1:9222/x.jpg'), /non-public address/);
+  await assert.rejects(() => resolvePublicDestination('file:///etc/passwd'), /refusing a file: image URL/);
 });
 
 test('a redirect target is vetted against the same rule as the first hop', async () => {
-  // downloadPhoto resolves each Location through this same function, so a
-  // public URL that 302s inward is caught on the hop, not waved through.
   await assert.rejects(
-    () => assertPublicDestination('/internal', new URL('http://localhost/start')),
+    () => resolvePublicDestination('/internal', new URL('http://localhost/start')),
     /non-public address/,
   );
+});
+
+test('the vetted address is returned so the caller can pin to it', async () => {
+  // Returning the address is what closes the rebinding window: validating a
+  // name and letting the client resolve it again is two lookups, and the
+  // attacker controls what the second one answers.
+  const resolved = await resolvePublicDestination('http://93.184.216.34/x.jpg');
+  assert.equal(resolved.address, '93.184.216.34');
+  assert.equal(resolved.family, 4);
+  assert.equal(resolved.url.hostname, '93.184.216.34');
+});
+
+test('a carried-forward photo must still exist on disk', () => {
+  // Caught live: the download broke, the carry-forward kept the old path, and
+  // the record pointed at a file that was gone — the map renders that as a
+  // broken image, which is worse than the honest plain marker.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'property-hunt-photo-'));
+  fs.mkdirSync(path.join(dir, 'photos'));
+  const fresh = { lat: 1, lng: 2, photo: null } as unknown as Scraped;
+  const previous = { lat: 1, lng: 2, photo: 'photos/gone.jpg' } as Scraped;
+
+  assert.deepEqual(keepPreviousEnrichment(fresh, previous, dir), [], 'nothing to carry when the file is gone');
+  assert.equal(fresh.photo, null, 'better a plain marker than a broken image');
+
+  fs.writeFileSync(path.join(dir, 'photos', 'gone.jpg'), 'bytes');
+  const second = { lat: 1, lng: 2, photo: null } as unknown as Scraped;
+  assert.deepEqual(keepPreviousEnrichment(second, previous, dir), ['photo']);
+  assert.equal(second.photo, 'photos/gone.jpg');
 });
