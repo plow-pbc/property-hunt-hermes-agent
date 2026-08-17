@@ -1,6 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+
 import { scrapeRendered } from './scrape.ts';
 
 // A stand-in for the Camoufox proxy. Only `goto` and `eval` are used, and
@@ -102,4 +108,22 @@ test('a browser failure is not reported as a missing field', async () => {
       return true;
     },
   );
+});
+
+test('scraping into an uninitialized folder costs nothing and says what to do', async () => {
+  // The guard runs before connect(), so this needs no browser. Without it,
+  // readStore raised a bare ENOENT *after* the browser run, the geocode, and a
+  // photo download that had already created photos/ and an orphaned image.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'property-hunt-uninit-'));
+  const out = execFileSync(
+    process.execPath,
+    [fileURLToPath(new URL('./scrape.ts', import.meta.url)), 'https://example.com/listing/1'],
+    { env: { ...process.env, PROPERTY_HUNT_DIR: dir }, encoding: 'utf8' },
+  );
+
+  const payload = JSON.parse(out.trim());
+  assert.equal(payload.type, 'tool_error');
+  assert.match(payload.error, /no store at/);
+  assert.match(payload.error, /node properties\.ts init/, 'the message has to say what to run');
+  assert.deepEqual(fs.readdirSync(dir), [], 'nothing may be written before the store is known to exist');
 });

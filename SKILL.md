@@ -110,8 +110,10 @@ one opens the listing. Tell them where it is the first time they add a property.
 
 ## Rules
 
-- **Only ever change the store through `properties.ts`.** Never edit `data.js`
-  by hand. The commands write atomically, and the map may be open at the time.
+- **Only ever change the store through `scrape.ts` or `properties.ts`** —
+  `scrape.ts` adds and refreshes, `properties.ts` edits what you own and
+  deletes. **Never edit `data.js` by hand.** Both write atomically, and the map
+  may be open at the time.
 - **`scraped` is the listing's; `mine` is the user's.** You cannot `set` a
   scraped field — those only come from a scrape, so their timestamp stays honest.
 - **Never invent a value.** If the scrape did not find the price, it is `null`.

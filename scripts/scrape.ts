@@ -13,7 +13,7 @@ import { extractScraped, geocodeQuery } from './extract.ts';
 import type { PageSurfaces } from './extract.ts';
 import { coerceScraped, readStore, slugify, upsertScraped, writeStore } from './store.ts';
 import type { Scraped } from './store.ts';
-import { resolveDataDir } from './properties.ts';
+import { requireStore, resolveDataDir } from './properties.ts';
 
 const require = createRequire(import.meta.url);
 
@@ -141,6 +141,12 @@ async function main(): Promise<void> {
     return;
   }
 
+  // Cheapest check first, and before anything is written: without it an
+  // un-inited folder fails at readStore *after* the browser run, the geocode,
+  // and downloadPhoto has already created photos/ and an orphaned image.
+  const dir = resolveDataDir();
+  requireStore(dir);
+
   const { connect } = require('plow-browser');
   let browser: any;
   try {
@@ -154,7 +160,6 @@ async function main(): Promise<void> {
 
   const { scraped, photoUrl } = await scrapeRendered(browser, url);
   const id = slugify(scraped);
-  const dir = resolveDataDir();
 
   // Neither of the next two failures should lose the listing: a property with
   // no pin is still worth having, and the frontend surfaces it explicitly.

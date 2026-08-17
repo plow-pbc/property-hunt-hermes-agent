@@ -1,23 +1,14 @@
 #!/usr/bin/env node
-// The store CLI. The agent reaches data.js only through these verbs — never by
-// editing the file directly, which is what keeps every write atomic and keeps
-// scraped values honest about where they came from.
+// The store CLI: reading, and editing the fields the user owns. Adding and
+// refreshing belong to scrape.ts, which writes the store itself. Between them
+// they are the only writers — nothing hand-edits data.js, which is what keeps
+// every write atomic and scraped values honest about where they came from.
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import {
-  coerceScraped,
-  emptyStoreText,
-  readStore,
-  removeProperty,
-  setMine,
-  slugify,
-  upsertScraped,
-  writeStore,
-  MINE_FIELDS,
-} from './store.ts';
+import { emptyStoreText, readStore, removeProperty, setMine, writeStore, MINE_FIELDS } from './store.ts';
 import type { Property } from './store.ts';
 
 const BUNDLE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -40,6 +31,18 @@ the agent VM, else ~/Plow/properties on a Mac.
 
 A single-quoted value cannot contain an apostrophe, and notes do ("don't love
 the kitchen"). Replace each ' with '\\'' before quoting.`;
+
+/**
+ * Fail with the one message that says what to do. scrape.ts calls this before
+ * it opens a browser: without it, an un-inited folder surfaces a bare ENOENT
+ * from readStore *after* the scrape, geocode, and photo download have already
+ * run — leaving an orphaned image behind and telling the agent nothing.
+ */
+export function requireStore(dir: string): void {
+  if (!fs.existsSync(path.join(dir, 'data.js'))) {
+    throw new Error(`no store at ${dir} — run "node properties.ts init" first`);
+  }
+}
 
 /**
  * Resolve the data folder. The same code runs inside the agent container and on
@@ -123,9 +126,7 @@ function main(argv: string[]): void {
     return;
   }
 
-  if (!fs.existsSync(path.join(dir, 'data.js'))) {
-    throw new Error(`no store at ${dir} — run "node properties.ts init" first`);
-  }
+  requireStore(dir);
   const rows = readStore(dir);
 
   switch (verb) {
