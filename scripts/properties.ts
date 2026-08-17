@@ -28,7 +28,7 @@ const USAGE = `property-hunt store
   init                              scaffold the properties folder (idempotent)
   list [--json]                     every property
   get <id>                          one property as JSON
-  upsert --scraped "$(scrape.ts <url>)"   create or refresh; never touches your notes
+  upsert --scraped "$(node scrape.ts '<url>')"    create or refresh; keeps your notes
   set <id> <field> <value>          ${MINE_FIELDS.join(' | ')}
   rm <id>                           delete the property and its photo
   where                             print the folder being used
@@ -145,7 +145,9 @@ function main(argv: string[]): void {
     }
     case 'upsert': {
       const flag = rest.indexOf('--scraped');
-      if (flag === -1) throw new Error(`upsert needs --scraped '<json>'\n\n${USAGE}`);
+      // Don't restate the invocation — USAGE below carries it, and a second
+      // copy is a second thing to get wrong (this one was, for a whole round).
+      if (flag === -1) throw new Error(`upsert needs --scraped\n\n${USAGE}`);
       const payload = requireArg(rest[flag + 1], 'json');
       let parsed: unknown;
       try {
