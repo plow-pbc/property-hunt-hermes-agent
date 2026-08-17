@@ -52,7 +52,7 @@ JSON, so you can read it, diff it, or keep it in git.
 No dependencies and no build — Node 24 runs the TypeScript directly.
 
 ```sh
-node --test scripts/*.test.ts     # the suite
+just test                         # the suite
 node scripts/install-local.ts     # install this working copy into ~/Plow/skills
 ```
 

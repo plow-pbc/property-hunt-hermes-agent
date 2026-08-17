@@ -236,13 +236,6 @@ export function coerceScraped(input: unknown): Scraped {
   }
   const raw = input as Record<string, unknown>;
 
-  // The documented one-liner pipes scrape.ts straight into upsert, so a failed
-  // scrape arrives here as its error payload. Surface that instead of the
-  // misleading "address is required" it would otherwise produce.
-  if (raw.type === 'tool_error') {
-    throw new Error(`the scrape failed, so there is nothing to save: ${raw.error ?? 'unknown error'}`);
-  }
-
   for (const key of ['address', 'state', 'zip'] as const) {
     if (typeof raw[key] !== 'string' || (raw[key] as string).trim() === '') {
       throw new Error(`scraped.${key} is required and must be a non-empty string — it forms the dedup key`);

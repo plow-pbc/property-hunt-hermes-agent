@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Listing URL -> a Scraped record on stdout, ready to hand to
-// `properties.ts upsert --scraped`.
+// Listing URL -> a saved property. The single entrypoint for adding or
+// refreshing: it scrapes, geocodes, downloads the photo, and writes the store.
 //
 // Runs the page through Camoufox (plain HTTP gets a bot wall), reads only
 // standards-based surfaces, geocodes the address, and downloads the hero photo.
@@ -11,7 +11,7 @@ import { pathToFileURL } from 'node:url';
 
 import { extractScraped, geocodeQuery } from './extract.ts';
 import type { PageSurfaces } from './extract.ts';
-import { coerceScraped, slugify } from './store.ts';
+import { coerceScraped, readStore, slugify, upsertScraped, writeStore } from './store.ts';
 import type { Scraped } from './store.ts';
 import { resolveDataDir } from './properties.ts';
 
@@ -178,7 +178,14 @@ async function main(): Promise<void> {
     }
   }
 
-  process.stdout.write(`${JSON.stringify(scraped, null, 2)}\n`);
+  // Save directly rather than printing JSON for a second command to re-parse.
+  // That round trip was the whole reason a listing's text ever passed through a
+  // shell, which is what made quoting a recurring defect — an address like
+  // 1200 O'Farrell St breaks any single-quoted form of it.
+  const rows = readStore(dir);
+  const next = upsertScraped(rows, scraped);
+  writeStore(dir, next);
+  process.stdout.write(`${next.length > rows.length ? 'added' : 'refreshed'} ${id}\n`);
 }
 
 // Only run when invoked directly, so tests can import scrapeRendered.

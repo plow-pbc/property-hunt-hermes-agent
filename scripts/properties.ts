@@ -28,17 +28,18 @@ const USAGE = `property-hunt store
   init                              scaffold the properties folder (idempotent)
   list [--json]                     every property
   get <id>                          one property as JSON
-  upsert --scraped "$(node scrape.ts '<url>')"    create or refresh; keeps your notes
   set <id> <field> <value>          ${MINE_FIELDS.join(' | ')}
   rm <id>                           delete the property and its photo
   where                             print the folder being used
 
+Adding or refreshing a property writes the store on its own:
+  node scrape.ts '<listing-url>'
+
 The data folder is $PROPERTY_HUNT_DIR, else /workspace/host/properties inside
 the agent VM, else ~/Plow/properties on a Mac.
 
-Single-quoting a value cannot contain an apostrophe, and real addresses have
-them (O'Farrell St). Replace each ' with '\\'' before quoting, or use the
-double-quoted "$(...)" form shown above.`;
+A single-quoted value cannot contain an apostrophe, and notes do ("don't love
+the kitchen"). Replace each ' with '\\'' before quoting.`;
 
 /**
  * Resolve the data folder. The same code runs inside the agent container and on
@@ -141,25 +142,6 @@ function main(argv: string[]): void {
     }
     case 'get': {
       process.stdout.write(`${JSON.stringify(findOrThrow(rows, requireArg(rest[0], 'id')), null, 2)}\n`);
-      return;
-    }
-    case 'upsert': {
-      const flag = rest.indexOf('--scraped');
-      // Don't restate the invocation — USAGE below carries it, and a second
-      // copy is a second thing to get wrong (this one was, for a whole round).
-      if (flag === -1) throw new Error(`upsert needs --scraped\n\n${USAGE}`);
-      const payload = requireArg(rest[flag + 1], 'json');
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(payload);
-      } catch (err) {
-        throw new Error(`--scraped is not valid JSON: ${(err as Error).message}`);
-      }
-      const scraped = coerceScraped(parsed);
-      const before = rows.length;
-      const next = upsertScraped(rows, scraped);
-      writeStore(dir, next);
-      process.stdout.write(`${next.length > before ? 'added' : 'refreshed'} ${slugify(scraped)}\n`);
       return;
     }
     case 'set': {

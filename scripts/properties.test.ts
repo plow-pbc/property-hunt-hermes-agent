@@ -7,11 +7,21 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import { resolveDataDir } from './properties.ts';
+import { coerceScraped, readStore, upsertScraped, writeStore } from './store.ts';
 
 const CLI = fileURLToPath(new URL('./properties.ts', import.meta.url));
 
 function tmpdir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'property-hunt-cli-'));
+}
+
+/**
+ * Seed a property. scrape.ts owns adding in production (it scrapes and writes
+ * in one step), so there is no CLI verb to seed through — tests use the same
+ * store functions scrape.ts calls.
+ */
+function seed(dir: string, over: Record<string, unknown> = {}): void {
+  writeStore(dir, upsertScraped(readStore(dir), coerceScraped({ ...LISTING, ...over })));
 }
 
 /** Run the CLI the way the agent will: as a subprocess against a real folder. */
@@ -62,7 +72,7 @@ test('init scaffolds a folder the frontend can actually load', () => {
 test('init never destroys properties already collected', () => {
   const dir = tmpdir();
   run(dir, 'init');
-  run(dir, 'upsert', '--scraped', JSON.stringify(LISTING));
+  seed(dir);
   run(dir, 'set', '424-28th-st-94131-ca', 'notes', 'keep me');
 
   run(dir, 'init'); // e.g. after a skill upgrade
@@ -76,7 +86,7 @@ test('the add-then-annotate-then-refresh flow a user actually does', () => {
   const dir = tmpdir();
   run(dir, 'init');
 
-  assert.match(run(dir, 'upsert', '--scraped', JSON.stringify(LISTING)), /^added /);
+  seed(dir);
 
   const id = '424-28th-st-94131-ca';
   run(dir, 'set', id, 'rating', '4');
@@ -84,11 +94,7 @@ test('the add-then-annotate-then-refresh flow a user actually does', () => {
   run(dir, 'set', id, 'status', 'toured');
 
   // Price cut — the agent re-scrapes.
-  assert.match(
-    run(dir, 'upsert', '--scraped', JSON.stringify({ ...LISTING, price: 2950000 })),
-    /^refreshed /,
-    'the same house must refresh, not duplicate',
-  );
+  seed(dir, { price: 2950000 });
 
   const [row] = JSON.parse(run(dir, 'list', '--json'));
   assert.equal(row.scraped.price, 2950000);
@@ -102,7 +108,7 @@ test('the add-then-annotate-then-refresh flow a user actually does', () => {
 test('multi-word notes survive the shell without quoting gymnastics', () => {
   const dir = tmpdir();
   run(dir, 'init');
-  run(dir, 'upsert', '--scraped', JSON.stringify(LISTING));
+  seed(dir);
   run(dir, 'set', '424-28th-st-94131-ca', 'notes', 'needs', 'a', 'new', 'roof');
   const [row] = JSON.parse(run(dir, 'list', '--json'));
   assert.equal(row.mine.notes, 'needs a new roof');
@@ -116,7 +122,7 @@ test('operating on a store that does not exist yet says what to do', () => {
 test('rm deletes the property and its photo', () => {
   const dir = tmpdir();
   run(dir, 'init');
-  run(dir, 'upsert', '--scraped', JSON.stringify({ ...LISTING, photo: 'photos/x.jpg' }));
+  seed(dir, { photo: 'photos/x.jpg' });
   fs.writeFileSync(path.join(dir, 'photos', 'x.jpg'), 'jpegbytes');
 
   run(dir, 'rm', '424-28th-st-94131-ca');
@@ -128,6 +134,6 @@ test('rm deletes the property and its photo', () => {
 test('an unknown id lists the ids that do exist', () => {
   const dir = tmpdir();
   run(dir, 'init');
-  run(dir, 'upsert', '--scraped', JSON.stringify(LISTING));
+  seed(dir);
   assert.throws(() => run(dir, 'get', 'wrong-house'), /424-28th-st-94131-ca/);
 });

@@ -171,8 +171,11 @@
 
   // A store that failed to load must say so — never a blank page.
   if (typeof window.PROPERTIES === 'undefined') {
-    notice('<strong>Could not load data.js.</strong> The store is missing or unreadable, so nothing can be shown. ' +
-           'Ask Plow to add a property and it will rebuild this file.', true);
+    // Deliberately not "add a property and it will rebuild this": that is only
+    // true when the file is absent. If it exists but is damaged, init keeps it
+    // and every read fails the same way — so the honest ask is to look at it.
+    notice('<strong>Could not load data.js.</strong> The store is missing or damaged, so nothing can be shown. ' +
+           'Ask Plow to check it before adding anything else.', true);
     return;
   }
 

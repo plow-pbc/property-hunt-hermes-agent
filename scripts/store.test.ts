@@ -241,14 +241,6 @@ test('an address that survives the non-empty check but normalizes away is reject
   assert.throws(() => coerceScraped({ ...VALID, address: '###' }), /no usable characters/);
 });
 
-test('a failed scrape is reported as the scrape failure, not as bad input', () => {
-  // The documented one-liner pipes scrape.ts straight into upsert.
-  assert.throws(
-    () => coerceScraped({ type: 'tool_error', error: 'browser unavailable: service unreachable' }),
-    /the scrape failed.*browser unavailable/s,
-  );
-});
-
 test('photo can only name a file inside photos/', () => {
   // rm deletes this path, and the agent that writes it also reads untrusted
   // listing pages.

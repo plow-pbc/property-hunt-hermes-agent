@@ -39,24 +39,22 @@ Then:
      `https://www.compass.com/homedetails/<Address-Slug>/<ID>_pid/`.
    - Any listing site works (Zillow, Redfin, an MLS page). Prefer Compass only
      when *you* are the one choosing.
-2. **Scrape it, and save it:**
+2. **Save it — one command:**
 
 ```sh
 cd /workspace/host/skills/property-hunt/scripts
-node properties.ts upsert --scraped "$(node scrape.ts '<listing-url>')"
+node scrape.ts '<listing-url>'
 ```
 
-`scrape.ts` drives the browser, reads the listing, geocodes the address, and
-downloads the hero photo. It prints the record; `upsert` files it.
-
-The URL is single-quoted above because it is not a value you wrote. Escape it
-per **Quoting** below — that applies to every dynamic value, not just notes.
+That drives the browser, reads the listing, geocodes the address, downloads the
+hero photo, and writes the store. It prints `added <id>` or `refreshed <id>`.
 
 3. **Tell the user what you saved** — one line: address, price, beds/baths/sqft.
+   Read it back with `node properties.ts get <id>` if you need the details.
 
-**If the scrape fails** it prints `{"type":"tool_error","error":"..."}` instead of
-a record. `upsert` recognises that and refuses, repeating the error — read it,
-tell the user plainly, and do not invent values you could not measure.
+**If the scrape fails** it prints `{"type":"tool_error","error":"..."}` and saves
+nothing. Read the error, tell the user plainly, and do not invent values you
+could not measure.
 
 ## Editing
 
