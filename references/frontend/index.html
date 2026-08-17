@@ -172,7 +172,7 @@
   // A store that failed to load must say so — never a blank page.
   if (typeof window.PROPERTIES === 'undefined') {
     notice('<strong>Could not load data.js.</strong> The store is missing or unreadable, so nothing can be shown. ' +
-           'Run <code>properties.ts init</code>, or ask Plow to add a property.', true);
+           'Ask Plow to add a property and it will rebuild this file.', true);
     return;
   }
 
