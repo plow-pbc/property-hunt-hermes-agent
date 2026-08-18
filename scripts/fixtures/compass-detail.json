@@ -12,21 +12,6 @@
           ],
           "@id": "https://www.compass.com/homedetails/424-28th-St-San-Francisco-CA-94131/1QUY9H_pid/",
           "url": "https://www.compass.com/homedetails/424-28th-St-San-Francisco-CA-94131/1QUY9H_pid/",
-          "containedInPlace": {
-            "@type": "Place",
-            "@id": "https://www.compass.com/homedetails/424-28th-St-San-Francisco-CA-94131/1QUY9H_pid/#place",
-            "url": "https://www.compass.com/homedetails/424-28th-St-San-Francisco-CA-94131/1QUY9H_pid/#place",
-            "name": "424 28th St, San Francisco, CA 94131",
-            "address": {
-              "@type": "PostalAddress",
-              "@id": "https://www.compass.com/homedetails/424-28th-St-San-Francisco-CA-94131/1QUY9H_pid/#postalAddress",
-              "streetAddress": "424 28th St",
-              "addressLocality": "Noe Valley",
-              "addressRegion": "CA",
-              "postalCode": "94131",
-              "addressCountry": "US"
-            }
-          },
           "floorSize": [
             {
               "@type": "QuantitativeValue",
@@ -79,77 +64,6 @@
             "petsAllowed": false,
             "url": "https://www.compass.com/homedetails/424-28th-St-San-Francisco-CA-94131/1QUY9H_pid/"
           }
-        },
-        {
-          "@context": "https://schema.org",
-          "@type": "BreadcrumbList",
-          "itemListElement": [
-            {
-              "@type": "ListItem",
-              "position": 1,
-              "item": {
-                "@type": "Thing",
-                "@id": "https://www.compass.com/",
-                "url": "https://www.compass.com/",
-                "name": "Homepage"
-              }
-            },
-            {
-              "@type": "ListItem",
-              "position": 2,
-              "item": {
-                "@type": "Thing",
-                "@id": "https://www.compass.com/homes-for-sale/california/",
-                "url": "https://www.compass.com/homes-for-sale/california/",
-                "name": "CA"
-              }
-            },
-            {
-              "@type": "ListItem",
-              "position": 3,
-              "item": {
-                "@type": "Thing",
-                "@id": "https://www.compass.com/homes-for-sale/san-francisco-county-ca/",
-                "url": "https://www.compass.com/homes-for-sale/san-francisco-county-ca/",
-                "name": "San Francisco County"
-              }
-            },
-            {
-              "@type": "ListItem",
-              "position": 4,
-              "item": {
-                "@type": "Thing",
-                "@id": "https://www.compass.com/homes-for-sale/san-francisco-ca/",
-                "url": "https://www.compass.com/homes-for-sale/san-francisco-ca/",
-                "name": "San Francisco"
-              }
-            },
-            {
-              "@type": "ListItem",
-              "position": 5,
-              "item": {
-                "@type": "Thing",
-                "@id": "https://www.compass.com/homes-for-sale/noe-valley-san-francisco-ca/",
-                "url": "https://www.compass.com/homes-for-sale/noe-valley-san-francisco-ca/",
-                "name": "Noe Valley"
-              }
-            },
-            {
-              "@type": "ListItem",
-              "position": 6,
-              "item": {
-                "@type": "Thing",
-                "@id": "https://www.compass.com/homes-for-sale/san-francisco-ca-94131/",
-                "url": "https://www.compass.com/homes-for-sale/san-francisco-ca-94131/",
-                "name": "94131"
-              }
-            },
-            {
-              "@type": "ListItem",
-              "position": 7,
-              "name": "424 28th St"
-            }
-          ]
         }
       ]
     }
