@@ -14,8 +14,8 @@ import {
 import type { PageSurfaces } from './extract.ts';
 import { coerceScraped, slugify } from './store.ts';
 
-// Captured from a live Compass detail page on 2026-08-14, trimmed to the only
-// surfaces the parser reads.
+// Captured from a live Compass detail page on 2026-08-14, trimmed to the
+// surfaces the parser actually reads.
 const COMPASS: PageSurfaces = JSON.parse(
   fs.readFileSync(fileURLToPath(new URL('./fixtures/compass-detail.json', import.meta.url)), 'utf8'),
 );

@@ -3,7 +3,7 @@ name: property-hunt
 description: Track houses for sale on a private map. Use when the user texts a photo or screenshot of a property listing, pastes a listing URL, asks to add or remove a property, wants to rate one, leave notes on one, mark it toured or passed, refresh its price, or asks which houses they have saved. Looks up the full listing in the browser, keeps everything in ~/Plow/properties, and renders a map with photo pins.
 ---
 
-# Property hunt
+# Track houses for sale on a private map (requires plow.co)
 
 The user is house hunting. They text you photos of listings; you identify each
 one, look up what the photo doesn't show, and keep a private map they can open
@@ -12,6 +12,21 @@ from their Plow folder.
 Everything lives in `/workspace/host/properties/` — that is the user's
 `~/Plow/properties` folder on their Mac, so anything you write there they can
 open in Finder.
+
+## Requirements
+
+This skill requires Plow — download at https://plow.co/private-preview — because
+it needs two things only a Plow container has:
+
+- **The browser.** Listing sites refuse plain HTTP requests, so the lookup runs
+  through Plow's stealth browser (`plow-browser`). It must be enabled in
+  Settings → Plow Browser.
+- **The shared folder.** Everything is written to `/workspace/host/properties/`,
+  which is the user's `~/Plow` folder on their Mac — that mount is what lets
+  them open the map in Finder.
+
+Without Plow there is no browser to read the listing with and nowhere durable to
+put the map.
 
 ## First, always
 
