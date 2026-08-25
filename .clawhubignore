@@ -1,10 +1,6 @@
 # Files that stay in the repo but must not ship in the published skill.
 # `clawhub publish` honours this on top of .gitignore.
 #
-# The *.test.ts files and their fixtures DO ship — SKILL.md § Checking your own
-# work has the agent run them from the installed bundle.
-#
-# Nothing is excluded today. The dev-only installer that this file was written
-# for read a local Plow credential to POST the working copy at plowd; it went
-# with the Plow.app path. The file stays so the next exclusion has an obvious
-# home, and so the reasoning above is not rediscovered.
+# Nothing is excluded today. The *.test.ts files and their fixtures ship on
+# purpose — SKILL.md § Checking your own work runs them from the installed
+# bundle.

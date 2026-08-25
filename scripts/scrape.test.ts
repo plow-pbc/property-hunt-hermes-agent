@@ -175,14 +175,13 @@ test('a carried-forward photo must still exist on disk', () => {
 
 // --- the latch-backed harvest path -----------------------------------------
 
-test('the harvest expression reads the same two surfaces the store needs', () => {
-  // Pinned as strings because SKILL.md and the howto page both carry this
-  // expression verbatim; a silent edit here desynchronises three copies.
+test('the harvest expression reads the surfaces extractScraped consumes', () => {
+  // Only what running it cannot prove: the selectors have to match what
+  // extract.ts reads, and the deadline is shadowed by the run test below, so
+  // a change to it would otherwise pass unnoticed.
   assert.match(HARVEST_EXPRESSION, /script\[type="application\/ld\+json"\]/);
   assert.match(HARVEST_EXPRESSION, /meta\[property\^="og:"\], meta\[name\^="twitter:"\]/);
-  assert.match(HARVEST_EXPRESSION, /10000/, 'in-page deadline, inside latch 15s call budget');
-  assert.match(HARVEST_EXPRESSION, /750/, 'poll interval, same as the loop this replaces');
-  assert.match(HARVEST_EXPRESSION, /settled/, 'reports whether it returned by predicate or by deadline');
+  assert.match(HARVEST_EXPRESSION, /Date\.now\(\) \+ 10000/, 'inside latch 15s call budget');
   assert.doesNotMatch(HARVEST_EXPRESSION, /\n/, 'travels as one JSON string field');
 });
 
@@ -241,42 +240,49 @@ test('--harvest saves a listing without touching a browser', () => {
   assert.match(store, /"zip": "94131"/, 'the zip came from og:title, as it does in production');
 });
 
-test('a page that had not finished rendering is retryable, and writes nothing', () => {
-  const dir = initStore();
-  const before = fs.readFileSync(path.join(dir, 'data.js'), 'utf8');
+test('whether a failure is worth retrying is decided by how the poll exited', () => {
+  // A missing field raises the identical message whether the page is
+  // half-mounted or simply does not carry it, so `settled` is the only honest
+  // discriminator. Getting this backwards either spins on a page that will
+  // never yield, or gives up on the exact case the old in-process loop rode
+  // out and then succeeded on.
+  for (const { name, payload, retryable, says } of [
+    {
+      name: 'json-ld up, og not, poll timed out — the shape the old loop retried',
+      payload: { jsonld: [JSON.stringify(RESIDENCE)], og: {}, settled: false },
+      retryable: true,
+      says: /zip is required/,
+    },
+    {
+      name: 'nothing mounted at all',
+      payload: { jsonld: [], og: {}, settled: false },
+      retryable: true,
+      says: /could not find an address/,
+    },
+    {
+      name: 'both surfaces settled and still no address',
+      payload: {
+        jsonld: [],
+        og: { 'og:title': 'Listings near you', 'og:description': 'Browse homes for sale' },
+        settled: true,
+      },
+      retryable: false,
+      says: /another listing site/,
+    },
+  ]) {
+    const dir = initStore();
+    const before = fs.readFileSync(path.join(dir, 'data.js'), 'utf8');
+    const result = JSON.parse(harvestInto(dir, payload).trim());
 
-  // The exact shape the old in-process loop retried and then succeeded on:
-  // JSON-LD mounted without a postalCode, og:title not yet there. The eval hit
-  // its deadline rather than settling, which is what makes it worth another go.
-  const payload = JSON.parse(
-    harvestInto(dir, { jsonld: [JSON.stringify(RESIDENCE)], og: {}, settled: false }).trim(),
-  );
-
-  assert.equal(payload.type, 'tool_error');
-  assert.equal(payload.retryable, true, 'the eval timed out mid-render — one more poll is the fix');
-  assert.match(payload.error, /zip is required/, 'names the actual blocker');
-  assert.equal(
-    fs.readFileSync(path.join(dir, 'data.js'), 'utf8'),
-    before,
-    'a failed harvest leaves the store byte-identical',
-  );
-});
-
-test('a settled page missing a required field is not retryable, and says to try another site', () => {
-  const dir = initStore();
-  // Both surfaces mounted inside the deadline, and the address still is not
-  // there: polling this same page again returns this same payload forever.
-  const payload = JSON.parse(
-    harvestInto(dir, {
-      jsonld: [],
-      og: { 'og:title': 'Listings near you', 'og:description': 'Browse homes for sale' },
-      settled: true,
-    }).trim(),
-  );
-
-  assert.equal(payload.type, 'tool_error');
-  assert.ok(!payload.retryable, 'polling a settled page again cannot produce an address');
-  assert.match(payload.error, /another listing site/, 'offers the remedy that can actually work');
+    assert.equal(result.type, 'tool_error', name);
+    assert.equal(Boolean(result.retryable), retryable, name);
+    assert.match(result.error, says, name);
+    assert.equal(
+      fs.readFileSync(path.join(dir, 'data.js'), 'utf8'),
+      before,
+      `${name}: a failed harvest leaves the store byte-identical`,
+    );
+  }
 });
 
 test('--harvest rejects a payload that is not the two surfaces', () => {
