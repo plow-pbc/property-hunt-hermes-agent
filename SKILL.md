@@ -212,15 +212,63 @@ need one — a house hunt is a few dozen properties.
 house's photo with its price and bed count, ringed by status; clicking one opens
 the listing.
 
-To reach it from a phone, serve it to the tailnet:
+### Serving it to a phone
+
+The map is a file on the Mac, so a phone cannot open it directly. Put it on the
+user's tailnet — private, HTTPS, never the public internet.
+
+There is no checkout on the Mac, so you do this yourself rather than running a
+recipe there.
+
+**1. Find the Mac's python** — the launchd job must use the same interpreter
+that works interactively:
 
 ```json
-{ "command": ["just", "serve"], "cwd": "/Users/<user>/Plow/skills/property-hunt", "network": true }
+{ "command": ["/bin/sh", "-lc", "command -v python3"] }
 ```
 
-and `just serve-install` to keep it served across reboots. Both run on the Mac
-and print the URL. The file server binds to loopback only; Tailscale is the sole
-route in, and it is tailnet-scoped.
+**2. Write the launchd job.** Read `references/launchd/co.plow.property-map.plist`
+from your own checkout, substitute `@PYTHON@` with what step 1 printed, `@PORT@`
+with `8787`, and `@DIR@` with `/Users/<user>/Plow/properties`, then:
+
+```json
+{ "path": "/Users/<user>/Library/LaunchAgents/co.plow.property-map.plist", "content": "<the substituted plist>" }
+```
+
+**3. Load it.** Unload first so a re-run replaces the definition rather than
+failing, and make sure nothing else already holds the port — a second server
+would lose the bind and `KeepAlive` would respawn it forever:
+
+```json
+{ "command": ["/bin/sh", "-lc", "launchctl unload ~/Library/LaunchAgents/co.plow.property-map.plist 2>/dev/null; pkill -f 'http.server 8787' || true; launchctl load ~/Library/LaunchAgents/co.plow.property-map.plist"] }
+```
+
+**4. Check that what answers is the map**, not some other service that happened
+to hold the port. Port 8787 is not reserved, and publishing a stranger's
+service to the tailnet is worse than failing:
+
+```json
+{ "command": ["/bin/sh", "-lc", "curl -fsS http://127.0.0.1:8787/data.js | head -c 40"], "network": true }
+```
+
+It must print `window.PROPERTIES =`. If it does not, stop — do not continue to
+step 5.
+
+**5. Publish it to the tailnet.**
+
+```json
+{ "command": ["/Applications/Tailscale.app/Contents/MacOS/Tailscale", "serve", "--bg", "8787"], "network": true }
+```
+
+Then `serve status` prints the URL. Tell the user that one.
+
+Path serving (`serve <directory>`) is **refused** by the Mac build — "Path
+serving is not supported on macOS due to sandbox restrictions" — which is why
+there is a file server to proxy at all.
+
+The job starts **at login** and stops at logout. It does not start at boot
+before anyone has logged in, so after a restart the map returns once the user
+logs in — tell them that rather than promising it comes back on its own.
 
 ## Rules
 

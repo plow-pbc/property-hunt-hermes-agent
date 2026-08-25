@@ -115,25 +115,47 @@ test('no script reaches a filesystem', () => {
   assert.deepEqual(offenders, [], 'these still touch a filesystem');
 });
 
-test('the serve recipes bind the file server to loopback only', () => {
-  // Tailscale is the only way in, and it is tailnet-scoped. A 0.0.0.0 bind
-  // would put the map — and the addresses of houses someone is considering —
-  // on the whole LAN.
-  const just = fs.readFileSync(path.join(BUNDLE, 'justfile'), 'utf8');
-  assert.match(just, /--bind 127\.0\.0\.1/);
-  assert.doesNotMatch(just, /--bind 0\.0\.0\.0/);
-
-  // Read the argument that follows --bind, not any occurrence of an address:
-  // the comments in both files explain why NOT to bind 0.0.0.0, and a plain
-  // scan flags the explanation. Same trap the Bearer scan fell into.
+test('the launchd job binds the file server to loopback only', () => {
+  // Tailscale is the only way in, and it is tailnet-scoped. Binding the
+  // wildcard would put the map — and the addresses of houses someone is
+  // considering — on the whole LAN.
+  //
+  // Read the argument that FOLLOWS --bind, not any address in the file: the
+  // comments explain why not to bind the wildcard, and a plain scan flags the
+  // explanation. Same trap the Bearer scan fell into.
   const plist = fs.readFileSync(path.join(BUNDLE, 'references', 'launchd', 'co.plow.property-map.plist'), 'utf8');
   const args = [...plist.matchAll(/<string>([^<]*)<\/string>/g)].map((m) => m[1]);
   const bindAt = args.indexOf('--bind');
-  assert.notEqual(bindAt, -1, 'the plist must bind explicitly rather than default');
+  assert.notEqual(bindAt, -1, 'the job must bind explicitly rather than default');
   assert.equal(args[bindAt + 1], '127.0.0.1');
+  // The interpreter is substituted, never hardcoded: /usr/bin/python3 is the
+  // Command Line Tools shim and prompts for an install it cannot do under
+  // launchd, which KeepAlive turns into a silent respawn loop.
+  assert.ok(args.includes('@PYTHON@'), 'the python path is resolved on the Mac at install time');
+  assert.ok(!args.includes('/usr/bin/python3'), 'and never hardcoded');
+});
 
-  // Path serving is refused by the sandboxed macOS build, so the recipe must
-  // proxy a port. Getting this wrong fails at the operator, not in CI.
-  assert.match(just, /serve --bg/);
-  assert.doesNotMatch(just, /serve --bg [^\n]*Plow\/properties/);
+test('SKILL.md keeps both guards on the photo fetch', () => {
+  // These two flags are the only thing between an attacker-controlled og:image
+  // and a probe of the user's tailnet and LAN, because photoDirective
+  // deliberately stopped doing the fetch itself. The invariant lives in prose,
+  // so it is pinned here the way the harvest expression is — otherwise a
+  // rewrite drops a flag and the suite stays green.
+  const skill = fs.readFileSync(path.join(BUNDLE, 'SKILL.md'), 'utf8');
+  const block = skill.slice(skill.indexOf('"curl"'), skill.indexOf('"curl"') + 400);
+  assert.notEqual(skill.indexOf('"curl"'), -1, 'SKILL.md must show the fetch command');
+  assert.match(block, /"--resolve"/, 'the vetted address must be pinned');
+  assert.match(block, /"--max-redirs",\s*"0"/, 'unvetted redirect hops must be refused');
+});
+
+test('the docs say the job starts at login', () => {
+  // A LaunchAgent runs in the user's GUI session: it starts at login, not at
+  // boot. Asserted as the presence of the correct claim rather than the
+  // absence of the wrong one — a scan for "across reboots" also flags the
+  // sentence explaining why not to say it, which is how the two previous
+  // versions of this test failed.
+  for (const name of ['SKILL.md', 'README.md']) {
+    const text = fs.readFileSync(path.join(BUNDLE, name), 'utf8');
+    assert.match(text, /at login/i, `${name} must say when the job actually starts`);
+  }
 });

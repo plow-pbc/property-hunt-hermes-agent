@@ -60,10 +60,13 @@ JSON, so you can read it, diff it, or keep it in git.
 
 ## Viewing the map on a phone
 
-`just serve` on the Mac puts the map on your tailnet over HTTPS, and
-`just serve-install` keeps it there across reboots. The file server binds to
-loopback only — Tailscale is the sole route in, and it is tailnet-scoped, so
-the map is never on the public internet.
+Ask the agent to serve it. It installs a small launchd job on the Mac that
+starts a loopback-bound file server **at login**, then points Tailscale at
+that port. Tailscale is the sole route in and it is tailnet-scoped, so the map
+reaches your phone and never the public internet.
+
+A LaunchAgent lives in your login session, so it starts when you log in rather
+than at boot — after a restart the map comes back once you are logged in.
 
 ## Development
 
