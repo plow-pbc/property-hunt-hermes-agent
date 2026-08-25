@@ -176,7 +176,18 @@ test('the map is served as a port, never as a directory', () => {
   const serve = skillCommands().find((c) => c.includes('"serve"'));
   assert.ok(serve, 'SKILL.md must show the tailnet publish');
   assert.match(serve, /"serve", "--bg", "8787"/, 'proxy a port');
-  assert.ok(!/"serve", "[^"]*\//.test(serve), 'no serve argv may name a path');
+
+  // Every element AFTER serve, not just the next one: `serve --bg 8787 <dir>`
+  // satisfies the containment check above and is the realistic way to get this
+  // wrong, since --bg is the form the doc uses. The binary itself is a path,
+  // so only what follows the subcommand is inspected.
+  const argv = serve.split(',').map((x) => x.trim().replace(/^"|"$/g, ''));
+  const after = argv.slice(argv.indexOf('serve') + 1);
+  assert.deepEqual(
+    after.filter((x) => x.includes('/')),
+    [],
+    'no argument after `serve` may name a path — macOS refuses path serving',
+  );
 });
 
 test('the interpreter is resolved by running it', () => {
