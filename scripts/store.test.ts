@@ -19,8 +19,14 @@ import {
 } from './store.ts';
 import type { Scraped } from './store.ts';
 
+// Built THROUGH coerceScraped, not beside it. Assembling the literal directly
+// let the fixture produce a record no real path can: with listing_source
+// dropped from the literal the return no longer satisfied Scraped, and every
+// test riding this fixture serialized a row missing the label — which the map
+// renders as "View on undefined". Going through the owner also makes the
+// round-trip tests load-bearing for the derivation.
 function scraped(over: Partial<Scraped> = {}): Scraped {
-  return {
+  return coerceScraped({
     address: '424 28th Street',
     city: 'San Francisco',
     state: 'CA',
@@ -37,7 +43,7 @@ function scraped(over: Partial<Scraped> = {}): Scraped {
     photo: null,
     last_scraped_at: '2026-08-14T19:00:00.000Z',
     ...over,
-  };
+  });
 }
 
 function tmpdir(): string {
