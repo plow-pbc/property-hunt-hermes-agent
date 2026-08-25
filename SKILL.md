@@ -38,6 +38,10 @@ do** — do not invent an empty one.
 Plow Latch, which is how you reach the Mac. You need `plow_browser_open`,
 `plow_browser`, `plow_read_file`, `plow_write_file` and `plow_run_command`.
 
+Serving the map to a phone additionally needs a working `python3` and Tailscale
+on the Mac. Both are checked in that section before anything is installed, so
+nothing else here depends on them.
+
 `plow_run_command` takes an **argv array and runs it directly — there is no
 shell**. `~` is never expanded, so use the real absolute path. Values are
 separate array elements; never build one string out of them.
@@ -218,53 +222,80 @@ The map is a file on the Mac, so a phone cannot open it directly. Put it on the
 user's tailnet — private, HTTPS, never the public internet.
 
 There is no checkout on the Mac, so you do this yourself rather than running a
-recipe there.
+recipe there. It needs a working `python3` and Tailscale on the Mac; both are
+checked below before anything is installed.
 
-**1. Find the Mac's python** — the launchd job must use the same interpreter
-that works interactively:
+**1. Check there is a map to serve.**
 
 ```json
-{ "command": ["/bin/sh", "-lc", "command -v python3"] }
+{ "tool": "plow_read_file", "path": "/Users/<user>/Plow/properties/data.js" }
 ```
 
-**2. Write the launchd job.** Read `references/launchd/co.plow.property-map.plist`
-from your own checkout, substitute `@PYTHON@` with what step 1 printed, `@PORT@`
-with `8787`, and `@DIR@` with `/Users/<user>/Plow/properties`, then:
+If that fails there is nothing to serve yet — the folder is created on the
+first save. Tell the user to add a house first and stop here.
+
+**2. Resolve the interpreter by RUNNING it, not by locating it.**
+
+```json
+{ "command": ["/bin/sh", "-lc", "python3 -c 'import sys; print(sys.executable)'"] }
+```
+
+`command -v python3` is not good enough. On a Mac without Command Line Tools,
+`/usr/bin/python3` exists and is executable but is a shim that prompts for an
+install — under launchd that is a non-zero exit into a respawn loop, and the
+map goes blank while everything looks configured. Running it proves it works.
+**If this exits non-zero, stop** and tell the user to install Python or the
+Command Line Tools. Do not write a plist naming an interpreter that never ran.
+
+**3. Find Tailscale**, which may be the app bundle or the open-source CLI:
+
+```json
+{ "command": ["/bin/sh", "-lc", "command -v tailscale || echo /Applications/Tailscale.app/Contents/MacOS/Tailscale"] }
+```
+
+**4. Write the launchd job.** Read
+`references/launchd/co.plow.property-map.plist` from your own checkout,
+substitute `@PYTHON@` with step 2's output, `@PORT@` with `8787`, and `@DIR@`
+with `/Users/<user>/Plow/properties`, then:
 
 ```json
 { "path": "/Users/<user>/Library/LaunchAgents/co.plow.property-map.plist", "content": "<the substituted plist>" }
 ```
 
-**3. Load it.** Unload first so a re-run replaces the definition rather than
-failing, and make sure nothing else already holds the port — a second server
-would lose the bind and `KeepAlive` would respawn it forever:
+**5. Load it.** Unload first so a re-run replaces the definition, and free the
+port of anything that is not launchd — a second server would lose the bind and
+`KeepAlive` would respawn it forever:
 
 ```json
-{ "command": ["/bin/sh", "-lc", "launchctl unload ~/Library/LaunchAgents/co.plow.property-map.plist 2>/dev/null; pkill -f 'http.server 8787' || true; launchctl load ~/Library/LaunchAgents/co.plow.property-map.plist"] }
+{ "command": ["/bin/sh", "-lc", "launchctl unload ~/Library/LaunchAgents/co.plow.property-map.plist 2>/dev/null; lsof -ti :8787 | xargs -r kill; launchctl load ~/Library/LaunchAgents/co.plow.property-map.plist"] }
 ```
 
-**4. Check that what answers is the map**, not some other service that happened
-to hold the port. Port 8787 is not reserved, and publishing a stranger's
-service to the tailnet is worse than failing:
+Use `lsof`, not `pkill -f 'http.server 8787'`. That pattern matches the argv of
+the shell running it, so the shell kills itself and `launchctl load` never
+runs — and the failure only surfaces at the next step as an unexplained curl
+error.
+
+**6. Check that what answers is the map**, not some other service that happened
+to hold the port. 8787 is not reserved, and publishing a stranger's service to
+the tailnet is worse than failing:
 
 ```json
 { "command": ["/bin/sh", "-lc", "curl -fsS http://127.0.0.1:8787/data.js | head -c 40"], "network": true }
 ```
 
-It must print `window.PROPERTIES =`. If it does not, stop — do not continue to
-step 5.
+It must print `window.PROPERTIES =`. If it does not, stop — do not continue.
 
-**5. Publish it to the tailnet.**
+**7. Publish it to the tailnet**, using the path step 3 printed:
 
 ```json
-{ "command": ["/Applications/Tailscale.app/Contents/MacOS/Tailscale", "serve", "--bg", "8787"], "network": true }
+{ "command": ["<tailscale>", "serve", "--bg", "8787"], "network": true }
 ```
 
 Then `serve status` prints the URL. Tell the user that one.
 
-Path serving (`serve <directory>`) is **refused** by the Mac build — "Path
-serving is not supported on macOS due to sandbox restrictions" — which is why
-there is a file server to proxy at all.
+Serve a **port**, never a directory. `tailscale serve <directory>` is refused
+outright by the Mac build — "Path serving is not supported on macOS due to
+sandbox restrictions" — which is why there is a file server to proxy at all.
 
 The job starts **at login** and stops at logout. It does not start at boot
 before anyone has logged in, so after a restart the map returns once the user

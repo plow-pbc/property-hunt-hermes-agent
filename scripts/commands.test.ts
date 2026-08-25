@@ -148,6 +148,62 @@ test('SKILL.md keeps both guards on the photo fetch', () => {
   assert.match(block, /"--max-redirs",\s*"0"/, 'unvetted redirect hops must be refused');
 });
 
+
+/**
+ * Every command SKILL.md tells the agent to run, as one string per invocation.
+ *
+ * Assertions about what a command must or must not contain have to read this
+ * rather than the whole document. Four separate contract tests here have been
+ * broken by matching the prose that explains what NOT to do — the sentence
+ * warning against a flag contains the flag.
+ */
+function skillCommands(): string[] {
+  const skill = fs.readFileSync(path.join(BUNDLE, 'SKILL.md'), 'utf8');
+  const out: string[] = [];
+  for (const fence of skill.matchAll(/```json\n([\s\S]*?)```/g)) {
+    for (const cmd of fence[1].matchAll(/"command"\s*:\s*\[([^\]]*)\]/g)) {
+      out.push(cmd[1].replace(/\s+/g, ' ').trim());
+    }
+  }
+  return out;
+}
+
+test('the map is served as a port, never as a directory', () => {
+  // `tailscale serve <directory>` is refused outright by the Mac build. This
+  // was pinned when the invocation lived in the justfile; the invocation moved
+  // to SKILL.md and the pin has to move with it, because getting it wrong is a
+  // hard error at the operator rather than a red test.
+  const serve = skillCommands().find((c) => c.includes('"serve"'));
+  assert.ok(serve, 'SKILL.md must show the tailnet publish');
+  assert.match(serve, /"serve", "--bg", "8787"/, 'proxy a port');
+  assert.ok(!/"serve", "[^"]*\//.test(serve), 'no serve argv may name a path');
+});
+
+test('the interpreter is resolved by running it', () => {
+  // `command -v python3` finds /usr/bin/python3 — the Command Line Tools shim
+  // that exists, is executable, and exits non-zero under launchd. Locating it
+  // succeeds in exactly the case that must fail, so the check has to run it.
+  const cmds = skillCommands();
+  assert.ok(
+    cmds.some((c) => /python3 -c .import sys; print\(sys\.executable\)./.test(c)),
+    'the interpreter must be resolved by running it',
+  );
+  assert.ok(
+    !cmds.some((c) => /command -v python3/.test(c)),
+    'locating it is not proof it runs — /usr/bin/python3 is a shim that exists and fails',
+  );
+});
+
+test('the port is freed without the shell killing itself', () => {
+  // `pkill -f 'http.server 8787'` matches the argv of the shell running it, so
+  // the shell SIGTERMs itself and the launchctl load that follows never runs.
+  const cmds = skillCommands();
+  const load = cmds.find((c) => c.includes('launchctl load'));
+  assert.ok(load, 'SKILL.md must show the job being loaded');
+  assert.match(load, /lsof -ti :8787/, 'free the port by what holds it, not by a name pattern');
+  assert.ok(!/pkill -f .http\.server/.test(load), 'that pattern matches the running shell');
+});
+
 test('the docs say the job starts at login', () => {
   // A LaunchAgent runs in the user's GUI session: it starts at login, not at
   // boot. Asserted as the presence of the correct claim rather than the
