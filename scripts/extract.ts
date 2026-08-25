@@ -214,6 +214,22 @@ export function extractScraped(page: PageSurfaces, now: string = new Date().toIS
     (typeof image === 'string' ? image : undefined) ??
     og['og:image'];
 
+  // The photo is decorative and every other way it can fail is survivable: a
+  // download error is downgraded to a plain marker, and keepPreviousEnrichment
+  // is built on a missing photo being fine. Parsing was the one place a bad
+  // image discarded the whole listing — and the URL is site-controlled text,
+  // so one bad value meant a property could never be added from that site.
+  // The listing URL below stays strict on purpose: it is the dedup key and the
+  // thing the user clicks, not decoration.
+  let photoUrl: string | null = null;
+  if (imageUrl) {
+    try {
+      photoUrl = new URL(imageUrl, page.url).href;
+    } catch {
+      photoUrl = null;
+    }
+  }
+
   const propertyType =
     listing ? typesOf(listing).find((t) => t !== 'Product' && t !== 'RealEstateListing') ?? null : null;
 
@@ -236,6 +252,6 @@ export function extractScraped(page: PageSurfaces, now: string = new Date().toIS
       photo: null,
       last_scraped_at: now,
     },
-    photoUrl: imageUrl ? new URL(imageUrl, page.url).href : null,
+    photoUrl,
   };
 }

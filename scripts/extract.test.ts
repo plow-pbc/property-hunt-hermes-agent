@@ -171,3 +171,48 @@ test('a non-Compass listing parses from open-graph alone', () => {
   assert.equal(scraped.sqft, 1100);
   assert.equal(scraped.listing_source, 'zillow.com');
 });
+
+// A page carrying only what these two tests are about. COMPASS cannot be used:
+// its json-ld supplies its own `image` and `url`, which outrank the og values,
+// so overriding og there proves nothing.
+const MINIMAL: PageSurfaces = {
+  url: 'https://www.compass.com/homedetails/424-28th-St-San-Francisco-CA-94131/1QUY9H_pid/',
+  jsonld: [
+    {
+      '@type': 'SingleFamilyResidence',
+      address: {
+        '@type': 'PostalAddress',
+        streetAddress: '424 28th St',
+        addressLocality: 'San Francisco',
+        addressRegion: 'CA',
+        postalCode: '94131',
+      },
+      offers: { '@type': 'Offer', price: 3250000 },
+    },
+  ],
+  og: { 'og:title': '424 28th St, San Francisco, CA 94131' },
+};
+
+test('a hero image we cannot parse costs the pin its photo, not the listing', () => {
+  // The image URL is site-controlled text. Every other way the photo can fail
+  // is already survivable — a failed download becomes a plain marker — but
+  // parsing threw, so one bad og:image meant the property could never be added
+  // from that site at all.
+  const { scraped, photoUrl } = extractScraped({
+    ...MINIMAL,
+    og: { ...MINIMAL.og, 'og:image': 'http://[[[bad' },
+  });
+
+  assert.equal(photoUrl, null, 'no photo to download');
+  assert.equal(scraped.address, '424 28th St', 'and the listing is saved anyway');
+  assert.equal(scraped.price, 3250000, 'with everything the page did publish');
+});
+
+test('a listing whose own url will not parse is refused', () => {
+  // The counterpart to the leniency above, and the reason it is not applied
+  // here: listing_url is the dedup key and the link the user clicks.
+  assert.throws(
+    () => extractScraped({ ...MINIMAL, og: { ...MINIMAL.og, 'og:url': 'http://[[[bad' } }),
+    /Invalid URL/,
+  );
+});

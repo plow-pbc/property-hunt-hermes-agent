@@ -246,7 +246,7 @@ test('whether a failure is worth retrying is decided by how the poll exited', ()
   // discriminator. Getting this backwards either spins on a page that will
   // never yield, or gives up on the exact case the old in-process loop rode
   // out and then succeeded on.
-  for (const { name, payload, retryable, says } of [
+  for (const { name, payload, retryable, says, omits } of [
     {
       name: 'json-ld up, og not, poll timed out — the shape the old loop retried',
       payload: { jsonld: [JSON.stringify(RESIDENCE)], og: {}, settled: false },
@@ -260,17 +260,20 @@ test('whether a failure is worth retrying is decided by how the poll exited', ()
       says: /could not find an address/,
     },
     {
-      // Settled, and the failure is not a missing field at all: a malformed
-      // og:image raises "Invalid URL" out of extractScraped. Polling again
-      // returns the identical payload, so this must not read as retryable.
+      // Settled, and the failure is not a missing field at all: a listing that
+      // advertises an unparseable canonical URL raises "Invalid URL". Polling
+      // again returns the identical payload, so this must not read as
+      // retryable — and the try-another-site advice would be a non sequitur,
+      // since nothing about the page's *fields* is the problem.
       name: 'settled, failing for a reason no missing-field pattern matches',
       payload: {
-        jsonld: [JSON.stringify(RESIDENCE)],
-        og: { ...FULL_OG, 'og:image': 'http://[[[bad' },
+        jsonld: [JSON.stringify({ ...RESIDENCE, url: 'http://[[[bad' })],
+        og: FULL_OG,
         settled: true,
       },
       retryable: false,
       says: /Invalid URL/,
+      omits: /another listing site/,
     },
     {
       name: 'both surfaces settled and still no address',
@@ -290,6 +293,10 @@ test('whether a failure is worth retrying is decided by how the poll exited', ()
     assert.equal(result.type, 'tool_error', name);
     assert.equal(Boolean(result.retryable), retryable, name);
     assert.match(result.error, says, name);
+    // The wording half of the same decision: `settled` picks retryability, the
+    // error text picks whether the try-another-site sentence is appended. A
+    // regression that always appends it would pass a positive-match-only table.
+    if (omits) assert.doesNotMatch(result.error, omits, name);
     assert.equal(
       fs.readFileSync(path.join(dir, 'data.js'), 'utf8'),
       before,
