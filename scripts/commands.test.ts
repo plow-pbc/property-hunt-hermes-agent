@@ -4,6 +4,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { HARVEST_EXPRESSION } from './scrape.ts';
+
 // Several review rounds went to one defect: a user-facing string naming one of
 // these scripts that isn't runnable as printed. Fixing each site as it was
 // cited just relocated it, so the invariant is pinned here instead.
@@ -70,4 +72,28 @@ test('every command we print is runnable as printed', () => {
     }
   }
   assert.deepEqual(offenders, [], `these name a script without "node ", so they don't run as printed`);
+});
+
+test('SKILL.md carries the harvest expression byte-identically', () => {
+  // Three copies of this string exist: the constant, SKILL.md, and the howto
+  // page in plow-pbc/howto. Only the first two are checkable from here, and
+  // drift between them is a scrape that fails at the user rather than at CI —
+  // the agent would paste an expression whose shape extractScraped no longer
+  // reads.
+  const skill = fs.readFileSync(path.join(BUNDLE, 'SKILL.md'), 'utf8');
+  assert.ok(
+    skill.includes(HARVEST_EXPRESSION),
+    'SKILL.md must contain the exact HARVEST_EXPRESSION exported by scrape.ts',
+  );
+});
+
+test('no doc still tells the agent to escape a shell', () => {
+  // Under plow_run_command values are argv elements. Advice to wrap them in
+  // single quotes and replace ' with \'\\\'\' would make every note arrive
+  // with literal backslashes in it.
+  for (const doc of ['SKILL.md', 'README.md']) {
+    const text = fs.readFileSync(path.join(BUNDLE, doc), 'utf8');
+    assert.doesNotMatch(text, /single-quote/i, `${doc} still teaches shell quoting`);
+    assert.doesNotMatch(text, /\\'\\\\'\\'/, `${doc} still carries the escape recipe`);
+  }
 });

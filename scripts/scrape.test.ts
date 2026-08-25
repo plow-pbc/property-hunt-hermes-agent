@@ -296,3 +296,56 @@ test('--harvest refuses a url that is not one', () => {
   assert.equal(payload.type, 'tool_error');
   assert.match(payload.error, /--harvest/, 'the usage line names the mode actually being used');
 });
+
+test('the harvest expression actually runs, and reports which exit it took', async () => {
+  // Every other assertion about this string is a regex over its source. It is
+  // the one piece of this skill that executes somewhere we cannot reach from
+  // here, so a syntax error or a renamed field would ship green and fail only
+  // in the page, where the symptom is a scrape that never works.
+  //
+  // `Date` and `setTimeout` are shadowed as parameters so the deadline path can
+  // be proven without spending ten real seconds on it.
+  const makeDoc = (jsonld: string[], og: Record<string, string>) => ({
+    querySelectorAll(selector: string) {
+      if (selector.includes('ld+json')) return jsonld.map((textContent) => ({ textContent }));
+      return Object.entries(og).map(([key, content]) => ({
+        getAttribute: (attr: string) => (attr === 'property' ? key : null),
+        content,
+      }));
+    },
+  });
+
+  const run = (doc: unknown) => {
+    let clock = 0;
+    const clockedDate = { now: () => clock };
+    const instantly = (fn: () => void, ms: number) => {
+      clock += ms;
+      fn();
+    };
+    return new Function('document', 'Date', 'setTimeout', `return ${HARVEST_EXPRESSION}`)(
+      doc,
+      clockedDate,
+      instantly,
+    ) as Promise<{ jsonld: string[]; og: Record<string, string>; settled: boolean }>;
+  };
+
+  const ready = await run(makeDoc(['{"@type":"House"}'], { 'og:title': '424 28th St' }));
+  assert.deepEqual(ready.jsonld, ['{"@type":"House"}'], 'json-ld comes back as raw text, not parsed');
+  assert.equal(ready.og['og:title'], '424 28th St');
+  assert.equal(ready.settled, true, 'both surfaces present on the first read');
+
+  const stillEmpty = await run(makeDoc([], {}));
+  assert.equal(stillEmpty.settled, false, 'reached the deadline with a surface still empty');
+  assert.deepEqual(stillEmpty.jsonld, []);
+
+  // The half-mounted shape: json-ld up, og not. This is the case the old
+  // in-process loop rode out, and it must read as unsettled rather than as a
+  // page that simply has no address.
+  const halfway = await run(makeDoc(['{"@type":"House"}'], {}));
+  assert.equal(halfway.settled, false, 'one empty surface is not a settled page');
+
+  // And the payload the expression produces must be what parseHarvest accepts.
+  const { page, settled } = parseHarvest(JSON.stringify(ready), URL_);
+  assert.equal(settled, true);
+  assert.deepEqual(page.jsonld, [{ '@type': 'House' }], 'the two halves agree on the wire format');
+});
