@@ -49,43 +49,67 @@ export function envelope(e: Envelope): string {
  * an empty store would print a valid-looking envelope whose write discards
  * every property the operator has.
  */
-export function takeStore(argv: string[], read: (p: string) => string = readFileSync): {
-  rest: string[];
-  text: string;
-} {
-  const fileAt = argv.indexOf('--store-file');
-  if (fileAt !== -1 && argv[fileAt + 1] !== undefined) {
-    // The preferred form. The store and the harvest payload are both large and
-    // partly attacker-controlled — a listing's JSON-LD can contain any byte —
-    // so passing them as shell-quoted arguments lets an apostrophe end the
-    // quote and the rest become command syntax. A path cannot: the agent
-    // chooses it, and its contents are never parsed by a shell.
-    return {
-      rest: [...argv.slice(0, fileAt), ...argv.slice(fileAt + 2)],
-      text: read(argv[fileAt + 1]),
-    };
-  }
-  const at = argv.indexOf('--store');
+/**
+ * One request file, and nothing else.
+ *
+ * Every value these scripts handle is untrusted: the harvest payload IS a
+ * listing page's JSON-LD, the store holds the user's own notes, the listing
+ * URL is pasted, and a note is whatever they typed. Any of them inside shell
+ * source lets an apostrophe end the quote and the rest become command syntax
+ * in the agent's container — and a URL cannot be validated first, because the
+ * shell has already parsed it by then.
+ *
+ * So none of them are arguments. The agent writes one JSON file and passes its
+ * path, which is a value it chose itself.
+ */
+export type Request = {
+  store: string;
+  verb?: string;
+  id?: string;
+  field?: string;
+  value?: string;
+  json?: boolean;
+  harvest?: string;
+  url?: string;
+  photoOnDisk?: boolean;
+};
+
+export function takeRequest(argv: string[], read = (p: string) => readFileSync(p, 'utf8')): Request {
+  const at = argv.indexOf('--request');
   if (at === -1 || argv[at + 1] === undefined) {
-    throw new Error(`missing --store-file <path> (or --store <contents>)\n\n${USAGE}`);
+    throw new Error(`missing --request <path to a JSON request>\n\n${USAGE}`);
   }
-  return { rest: [...argv.slice(0, at), ...argv.slice(at + 2)], text: argv[at + 1] };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(read(argv[at + 1]));
+  } catch (err) {
+    throw new Error(`could not read the request at ${argv[at + 1]}: ${(err as Error).message}`);
+  }
+  const req = parsed as Request;
+  if (typeof req?.store !== 'string') {
+    throw new Error('the request needs a "store" string — the contents of data.js');
+  }
+  return req;
 }
 
-const USAGE = `property-hunt store — every command takes --store
+const USAGE = `property-hunt store — one JSON request file, no other arguments
 
-  list [--json]   --store <data.js>          every property
-  get <id>        --store <data.js>          one property as JSON
-  set <id> <field> <value> --store <data.js> ${MINE_FIELDS.join(' | ')}
-  rm <id>         --store <data.js>          drop it, and name its photo
+  node properties.ts --request <path>
 
-Adding and refreshing a property is a separate command — see SKILL.md.
+The file holds everything, because every value here is untrusted — the store
+carries the user's notes, and a note is whatever they typed:
 
---store takes the CONTENTS of data.js, not a path. Mutating commands print a
-JSON envelope: the new store, plus anything the agent must do on the Mac.
+  { "verb": "list", "json": true,        "store": "<contents of data.js>" }
+  { "verb": "get",  "id": "<id>",        "store": "…" }
+  { "verb": "set",  "id": "<id>", "field": "${MINE_FIELDS.join('|')}", "value": "…", "store": "…" }
+  { "verb": "rm",   "id": "<id>",        "store": "…" }
 
-Values are passed as separate arguments, never concatenated into one string, so
-an apostrophe in a note needs no escaping.`;
+Nothing is passed as a shell word, so no apostrophe or metacharacter in a note,
+an id, or the store can become command syntax. Adding and refreshing a property
+is a separate command — see SKILL.md.
+
+list and get print their output. set and rm print a JSON envelope: the new
+store, plus anything the agent must do on the Mac.`;
 
 function requireArg(value: string | undefined, name: string): string {
   if (value === undefined || value === '') throw new Error(`missing <${name}>\n\n${USAGE}`);
@@ -113,19 +137,18 @@ function summarize(row: Property): string {
 }
 
 function main(argv: string[]): void {
-  const [verb] = argv;
-  if (!verb || verb === '--help' || verb === '-h') {
+  if (argv[0] === '--help' || argv[0] === '-h' || argv.length === 0) {
     process.stdout.write(`${USAGE}\n`);
     return;
   }
 
-  const { rest: all, text } = takeStore(argv);
-  const rows = loadStore(text);
-  const rest = all.slice(1);
+  const req = takeRequest(argv);
+  const rows = loadStore(req.store);
+  const verb = req.verb;
 
   switch (verb) {
     case 'list': {
-      if (rest.includes('--json')) {
+      if (req.json) {
         process.stdout.write(`${JSON.stringify(rows, null, 2)}\n`);
       } else if (rows.length === 0) {
         process.stdout.write('no properties yet\n');
@@ -136,17 +159,14 @@ function main(argv: string[]): void {
       return;
     }
     case 'get': {
-      process.stdout.write(`${JSON.stringify(findOrThrow(rows, requireArg(rest[0], 'id')), null, 2)}\n`);
+      process.stdout.write(`${JSON.stringify(findOrThrow(rows, requireArg(req.id, 'id')), null, 2)}\n`);
       return;
     }
     case 'set': {
-      const id = requireArg(rest[0], 'id');
-      // Through findOrThrow so an unknown id lists the ones that exist, the
-      // same as rm. The agent matches loosely — "the one on Elm" — so the ids
-      // it can choose from are the useful half of the error.
+      const id = requireArg(req.id, 'id');
       findOrThrow(rows, id);
-      const field = requireArg(rest[1], 'field');
-      const value = rest.slice(2).join(' ');
+      const field = requireArg(req.field, 'field');
+      const value = req.value ?? '';
       process.stdout.write(
         envelope({
           store: serializeStore(setMine(rows, id, field, value)),
@@ -158,7 +178,7 @@ function main(argv: string[]): void {
       return;
     }
     case 'rm': {
-      const id = requireArg(rest[0], 'id');
+      const id = requireArg(req.id, 'id');
       const row = findOrThrow(rows, id);
       process.stdout.write(
         envelope({

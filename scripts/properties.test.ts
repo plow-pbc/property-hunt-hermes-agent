@@ -3,7 +3,11 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import { envelope, takeStore } from './properties.ts';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { envelope, takeRequest } from './properties.ts';
 import { coerceScraped, emptyStoreText, loadStore, serializeStore, upsertScraped } from './store.ts';
 
 const CLI = fileURLToPath(new URL('./properties.ts', import.meta.url));
@@ -29,17 +33,29 @@ function store(over: Record<string, unknown> = {}): string {
   return serializeStore(upsertScraped(loadStore(emptyStoreText()), coerceScraped({ ...LISTING, ...over })));
 }
 
-function run(...args: string[]): { out: string; err: string; code: number } {
-  const r = spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8' });
+/**
+ * Run the CLI the way the agent does: a real request file on disk.
+ *
+ * Executing it matters. A previous version of this suite asserted only that
+ * the flag was spelled right, and passed while every file-backed run failed —
+ * readFileSync without an encoding returns a Buffer, which has no .trim().
+ */
+function run(req: Record<string, unknown>): { out: string; err: string; code: number } {
+  const dir = mkdtempSync(join(tmpdir(), 'property-hunt-req-'));
+  const path = join(dir, 'request.json');
+  writeFileSync(path, JSON.stringify(req));
+  const r = spawnSync(process.execPath, [CLI, '--request', path], { encoding: 'utf8' });
   return { out: r.stdout, err: r.stderr, code: r.status ?? 0 };
 }
 
 const ID = '424-28th-st-94131-ca';
 
-test('--store carries the contents, and is stripped from the arguments', () => {
-  const { rest, text } = takeStore(['set', 'x', 'notes', 'hi', '--store', 'CONTENTS']);
-  assert.deepEqual(rest, ['set', 'x', 'notes', 'hi']);
-  assert.equal(text, 'CONTENTS');
+test('the request file carries everything, and a missing store is fatal', () => {
+  const req = takeRequest(['--request', '/x'], () => JSON.stringify({ verb: 'set', store: 'CONTENTS' }));
+  assert.equal(req.store, 'CONTENTS');
+  assert.equal(req.verb, 'set');
+  assert.throws(() => takeRequest(['--request', '/x'], () => '{"verb":"list"}'), /store/);
+  assert.throws(() => takeRequest([]), /--request/);
 });
 
 test('an envelope omits what there is nothing to do about', () => {
@@ -50,7 +66,7 @@ test('an envelope omits what there is nothing to do about', () => {
 });
 
 test('set prints the new store and touches no disk', () => {
-  const { out } = run('set', ID, 'notes', "needs a roof, don't love the kitchen", '--store', store());
+  const { out } = run({ verb: 'set', id: ID, field: 'notes', value: "needs a roof, don't love the kitchen", store: store() });
   const env = JSON.parse(out);
   assert.equal(env.verb, 'updated');
   assert.equal(env.id, ID);
@@ -61,12 +77,12 @@ test('set prints the new store and touches no disk', () => {
 });
 
 test('multi-word notes arrive whole', () => {
-  const env = JSON.parse(run('set', ID, 'notes', 'needs', 'a', 'new', 'roof', '--store', store()).out);
+  const env = JSON.parse(run({ verb: 'set', id: ID, field: 'notes', value: 'needs a new roof', store: store() }).out);
   assert.equal(loadStore(env.store)[0].mine.notes, 'needs a new roof');
 });
 
 test('rm prints the new store and names the photo rather than deleting it', () => {
-  const env = JSON.parse(run('rm', ID, '--store', store({ photo: 'photos/x.jpg' })).out);
+  const env = JSON.parse(run({ verb: 'rm', id: ID, store: store({ photo: 'photos/x.jpg' }) }).out);
   assert.equal(env.verb, 'removed');
   assert.deepEqual(loadStore(env.store), []);
   // Named, not unlinked: nothing in this process can reach the Mac.
@@ -74,41 +90,48 @@ test('rm prints the new store and names the photo rather than deleting it', () =
 });
 
 test('rm of a property with no photo asks for no deletion', () => {
-  assert.equal(JSON.parse(run('rm', ID, '--store', store()).out).remove, undefined);
+  assert.equal(JSON.parse(run({ verb: 'rm', id: ID, store: store() }).out).remove, undefined);
 });
 
 test('list and get read the store they are handed', () => {
-  assert.match(run('list', '--store', store()).out, /424 28th/);
-  assert.equal(JSON.parse(run('get', ID, '--store', store()).out).id, ID);
-  assert.equal(JSON.parse(run('list', '--json', '--store', store()).out).length, 1);
-  assert.match(run('list', '--store', emptyStoreText()).out, /no properties yet/);
+  assert.match(run({ verb: 'list', store: store() }).out, /424 28th/);
+  assert.equal(JSON.parse(run({ verb: 'get', id: ID, store: store() }).out).id, ID);
+  assert.equal(JSON.parse(run({ verb: 'list', json: true, store: store() }).out).length, 1);
+  assert.match(run({ verb: 'list', store: emptyStoreText() }).out, /no properties yet/);
 });
 
-test('every verb refuses to run without --store', () => {
-  // The failure this exists for: defaulting to an empty store would print a
-  // valid-looking envelope whose write discards every property the user has.
-  for (const args of [['list'], ['get', ID], ['set', ID, 'notes', 'x'], ['rm', ID]]) {
-    const { out, err, code } = run(...args);
-    assert.notEqual(code, 0, `${args[0]} must exit non-zero`);
-    assert.match(err, /--store/, `${args[0]} must say what is missing`);
-    assert.doesNotMatch(out, /"store"/, `${args[0]} must print no envelope`);
+test('every verb refuses to run without a store', () => {
+  // Defaulting to an empty store would print a valid-looking envelope whose
+  // write discards every property the operator has.
+  for (const verb of ['list', 'get', 'set', 'rm']) {
+    const { out, err, code } = run({ verb, id: ID, field: 'notes', value: 'x' } as never);
+    assert.notEqual(code, 0, `${verb} must exit non-zero`);
+    assert.match(err, /store/, `${verb} must say what is missing`);
+    assert.doesNotMatch(out, /"store"/, `${verb} must print no envelope`);
   }
 });
 
+test('shell metacharacters in a note survive intact', () => {
+  // The reason the request file exists. None of this is ever a shell word.
+  const nasty = `'; touch /tmp/pwned; echo '$(whoami)` + '`id`' + ' "quoted" \\backslash';
+  const env = JSON.parse(run({ verb: 'set', id: ID, field: 'notes', value: nasty, store: store() }).out);
+  assert.equal(loadStore(env.store)[0].mine.notes, nasty);
+});
+
 test('a blank --store is refused rather than read as an empty store', () => {
-  const { err, code } = run('list', '--store', '');
+  const { err, code } = run({ verb: 'list', store: '' });
   assert.notEqual(code, 0);
   assert.match(err, /empty/i);
 });
 
 test('init and where are gone with the filesystem', () => {
   for (const verb of ['init', 'where']) {
-    assert.notEqual(run(verb, '--store', store()).code, 0, `${verb} is no longer a verb`);
+    assert.notEqual(run({ verb, store: store() }).code, 0, `${verb} is no longer a verb`);
   }
 });
 
 test('an unknown id lists the ids that do exist', () => {
-  const { err } = run('set', 'no-such-house', 'rating', '4', '--store', store());
+  const { err } = run({ verb: 'set', id: 'no-such-house', field: 'rating', value: '4', store: store() });
   assert.match(err, /no property with id/);
   assert.match(err, new RegExp(ID));
 });

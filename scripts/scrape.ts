@@ -8,14 +8,13 @@
 // downloads the hero photo.
 import * as net from 'node:net';
 import * as dns from 'node:dns/promises';
-import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 import { extractScraped, geocodeQuery } from './extract.ts';
 import type { PageSurfaces } from './extract.ts';
 import { coerceScraped, loadStore, serializeStore, slugify, storableUrl, upsertScraped } from './store.ts';
 import type { Scraped } from './store.ts';
-import { envelope, takeStore } from './properties.ts';
+import { envelope, takeRequest } from './properties.ts';
 import type { Fetch } from './properties.ts';
 
 const NOMINATIM = 'https://nominatim.openstreetmap.org/search';
@@ -295,32 +294,23 @@ export function keepPreviousEnrichment(
 }
 
 async function main(): Promise<void> {
-  const { rest, text } = takeStore(process.argv.slice(2));
-
-  // --harvest-file for the same reason as --store-file: the payload is a
-  // listing page's own JSON-LD, so it can contain any byte, and a shell-quoted
-  // argument lets an apostrophe in it become command syntax in this container.
-  const fileAt = rest.indexOf('--harvest-file');
-  const harvestText =
-    fileAt !== -1 && rest[fileAt + 1] !== undefined
-      ? readFileSync(rest[fileAt + 1], 'utf8')
-      : (rest[1] ?? '');
-  const url = fileAt !== -1 ? (rest[fileAt + 2] ?? '') : rest[0] === '--harvest' ? (rest[2] ?? '') : '';
+  const req = takeRequest(process.argv.slice(2));
+  const url = req.url ?? '';
   if (!storableUrl(url)) {
-    toolError('usage: node scrape.ts --harvest-file <path> <listing-url> --store-file <path>');
+    toolError('usage: node scrape.ts --request <path> — the file needs harvest, url and store');
     return;
   }
 
   // Parsed before anything else, so a damaged store fails here rather than
   // after the work — and it gives us what this property looked like before.
-  const before = loadStore(text);
+  const before = loadStore(req.store);
 
   let scraped: Scraped;
   let photoUrl: string | null;
   let page: PageSurfaces;
   let settled: boolean;
   try {
-    ({ page, settled } = parseHarvest(harvestText, url));
+    ({ page, settled } = parseHarvest(req.harvest ?? '', url));
   } catch (err) {
     // The caller's payload, not the page — another poll changes nothing.
     return toolError((err as Error).message);
@@ -336,6 +326,9 @@ async function main(): Promise<void> {
 
   const id = slugify(scraped);
   const notes: string[] = [];
+  // The agent knows whether the previous photo is still on the Mac. Absent
+  // means no, which costs a re-fetch rather than a record pointing at nothing.
+  const photoOnDisk = req.photoOnDisk === true;
 
   // Neither of the next two failures should lose the listing: a property with
   // no pin is still worth having, and the frontend surfaces it explicitly.
@@ -362,9 +355,6 @@ async function main(): Promise<void> {
     }
   }
 
-  // The agent knows whether the previous photo is still on the Mac. Absent
-  // means no, which costs a re-fetch rather than a record pointing at nothing.
-  const photoOnDisk = rest.includes('--photo-on-disk');
   for (const field of keepPreviousEnrichment(scraped, before.find((row) => row.id === id)?.scraped, photoOnDisk)) {
     notes.push(`kept the previous ${field} for ${id}`);
   }
@@ -376,8 +366,13 @@ async function main(): Promise<void> {
   // losing the listing and keeping a pin that points at nothing.
   let withoutPhoto: string | undefined;
   if (fetch) {
-    const fallback = upsertScraped(before, { ...scraped, photo: null });
-    withoutPhoto = serializeStore(fallback);
+    // Not always null. On a refresh where the caller says the previous image is
+    // still on the Mac, the staged download leaves that file untouched — so
+    // nulling it would delete a working pin to record a failure that cost
+    // nothing. Only drop the reference when there is no prior file to keep.
+    const priorPhoto = before.find((row) => row.id === id)?.scraped.photo ?? null;
+    const keep = photoOnDisk ? priorPhoto : null;
+    withoutPhoto = serializeStore(upsertScraped(before, { ...scraped, photo: keep }));
   }
 
   process.stdout.write(

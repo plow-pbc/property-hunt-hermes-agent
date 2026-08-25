@@ -1,3 +1,36 @@
+/**
+ * Run the transform the way the agent does: a real request file on disk.
+ *
+ * Executing it is the point. An earlier version of this suite checked only
+ * that the flags were spelled right and passed while every file-backed run
+ * failed — readFileSync without an encoding returns a Buffer, which has no
+ * .trim(). A flag-spelling assertion cannot catch that.
+ */
+function harvest(
+  payload: unknown,
+  url: string = URL_,
+  store: string = emptyStoreText(),
+  extra: Record<string, unknown> = {},
+) {
+  const dir = mkdtempSync(join(tmpdir(), 'property-hunt-harvest-'));
+  const path = join(dir, 'request.json');
+  writeFileSync(
+    path,
+    JSON.stringify({
+      harvest: typeof payload === 'string' ? payload : JSON.stringify(payload),
+      url,
+      store,
+      ...extra,
+    }),
+  );
+  const r = spawnSync(
+    process.execPath,
+    [fileURLToPath(new URL('./scrape.ts', import.meta.url)), '--request', path],
+    { encoding: 'utf8' },
+  );
+  return { out: r.stdout, err: r.stderr, code: r.status ?? 0 };
+}
+
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -5,6 +38,9 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
@@ -15,7 +51,7 @@ import {
   photoDirective,
   resolvePublicDestination,
 } from './scrape.ts';
-import { emptyStoreText, loadStore, serializeStore } from './store.ts';
+import { emptyStoreText, loadStore } from './store.ts';
 import type { Scraped } from './store.ts';
 
 const URL_ = 'https://www.compass.com/homedetails/424-28th-St-San-Francisco-CA-94131/1QUY9H_pid/';
@@ -57,16 +93,15 @@ test('a blank store is refused before anything is parsed', () => {
   assert.equal(payload.store, undefined, 'nothing to write back');
 });
 
-test('scrape refuses to run without --store at all', () => {
-  const good = JSON.stringify({ jsonld: [JSON.stringify(RESIDENCE)], og: FULL_OG, settled: true });
+test('scrape refuses to run without a request at all', () => {
   const r = spawnSync(
     process.execPath,
-    [fileURLToPath(new URL('./scrape.ts', import.meta.url)), '--harvest', good, URL_],
+    [fileURLToPath(new URL('./scrape.ts', import.meta.url)), '--harvest', '{}', URL_],
     { encoding: 'utf8' },
   );
   const payload = JSON.parse(r.stdout.trim());
   assert.equal(payload.type, 'tool_error');
-  assert.match(payload.error, /--store/);
+  assert.match(payload.error, /--request/);
   assert.equal(payload.store, undefined);
 });
 
@@ -212,23 +247,6 @@ test('parseHarvest reports whether the page settled or timed out', () => {
   assert.equal(parseHarvest(JSON.stringify(base), URL_).settled, false, 'absent means not settled');
 });
 
-/** Run the transform the way the agent does: store in, envelope out. */
-function harvest(payload: unknown, url: string = URL_, store: string = emptyStoreText(), extra: string[] = []) {
-  const r = spawnSync(
-    process.execPath,
-    [
-      fileURLToPath(new URL('./scrape.ts', import.meta.url)),
-      '--harvest',
-      typeof payload === 'string' ? payload : JSON.stringify(payload),
-      url,
-      '--store',
-      store,
-      ...extra,
-    ],
-    { encoding: 'utf8' },
-  );
-  return { out: r.stdout, err: r.stderr, code: r.status ?? 0 };
-}
 
 test('--harvest saves a listing without touching a browser', () => {
   const env = JSON.parse(harvest({ jsonld: [JSON.stringify(RESIDENCE)], og: FULL_OG, settled: true }).out);
@@ -290,7 +308,7 @@ test('--harvest rejects a payload that is not the two surfaces', () => {
 test('--harvest refuses a url that is not one', () => {
   const payload = JSON.parse(harvest({ jsonld: [], og: {}, settled: true }, 'not-a-url').out.trim());
   assert.equal(payload.type, 'tool_error');
-  assert.match(payload.error, /--harvest/, 'the usage line names the mode actually being used');
+  assert.match(payload.error, /--request/, 'the usage line names the mode actually being used');
 });
 
 test('the harvest expression actually runs, and reports which exit it took', async () => {
@@ -413,26 +431,28 @@ test('a photo on a non-public address never becomes a directive', async () => {
   }
 });
 
-test('a fetch directive comes with the store to write if the fetch fails', () => {
-  // The store is written before the agent runs curl, so a hotlink-blocking CDN
-  // or a 302 that --max-redirs 0 refuses would otherwise leave a record
-  // pointing at a file that never arrived — a broken image on the map, and one
-  // no later refresh can clear, because the photo field is non-null so the
-  // carry-forward branch never fires.
-  const env = JSON.parse(harvest({ jsonld: [JSON.stringify(RESIDENCE)], og: FULL_OG, settled: true }).out);
-
-  assert.ok(env.fetch, 'this fixture has a hero image');
-  assert.equal(loadStore(env.store)[0].scraped.photo, 'photos/424-28th-st-94131-ca.jpg');
-  assert.ok(env.store_without_photo, 'and the honest alternative');
-  assert.equal(loadStore(env.store_without_photo)[0].scraped.photo, null);
-  // Same listing either way — only the photo differs.
-  assert.equal(loadStore(env.store_without_photo)[0].scraped.address, '424 28th St');
-});
-
-test('no fetch means no alternative store to choose between', () => {
-  const env = JSON.parse(
-    harvest({ jsonld: [JSON.stringify(RESIDENCE)], og: { ...FULL_OG, 'og:image': 'http://127.0.0.1/x.jpg' }, settled: true }).out,
+test('a failed fetch keeps a photo that is still on the Mac', () => {
+  // The staged download leaves the previous file untouched, so nulling the
+  // reference on failure would delete a working pin to record a failure that
+  // cost nothing. Only drop it when there is no prior file to keep.
+  // Build the prior store the way a real one arrives: a saved listing that
+  // already has its photo on disk.
+  const first = JSON.parse(harvest({ jsonld: [JSON.stringify(RESIDENCE)], og: FULL_OG, settled: true }).out);
+  const withPhoto = first.store;
+  assert.equal(loadStore(withPhoto)[0].scraped.photo, 'photos/424-28th-st-94131-ca.jpg');
+  const kept = JSON.parse(
+    harvest({ jsonld: [JSON.stringify(RESIDENCE)], og: FULL_OG, settled: true }, URL_, withPhoto, {
+      photoOnDisk: true,
+    }).out,
   );
-  assert.equal(env.fetch, undefined);
-  assert.equal(env.store_without_photo, undefined);
+  assert.equal(
+    loadStore(kept.store_without_photo)[0].scraped.photo,
+    'photos/424-28th-st-94131-ca.jpg',
+    'the file is still there, so the pin stays',
+  );
+
+  const dropped = JSON.parse(
+    harvest({ jsonld: [JSON.stringify(RESIDENCE)], og: FULL_OG, settled: true }, URL_, withPhoto).out,
+  );
+  assert.equal(loadStore(dropped.store_without_photo)[0].scraped.photo, null, 'no claim it is there, so no pin');
 });

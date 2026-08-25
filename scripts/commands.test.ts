@@ -123,19 +123,24 @@ test('no script reaches the store or the photos', () => {
   assert.deepEqual(offenders, [], 'these reach the state rather than receiving it');
 });
 
-test('the store and the harvest payload can arrive as paths', () => {
-  // The injection surface this closes: a listing page's JSON-LD is
-  // attacker-controlled and goes into the transform. As a shell-quoted
-  // argument, an apostrophe in it ends the quote and the rest is command
-  // syntax in the agent's own container.
+test('nothing untrusted is passed as a shell word', () => {
+  // Every value these scripts touch is untrusted: the harvest payload is a
+  // listing page's JSON-LD, the store holds the user's notes, the URL was
+  // pasted. All of it travels in one request file whose path the agent chose.
   const props = fs.readFileSync(path.join(SCRIPTS, 'properties.ts'), 'utf8');
   const scrape = fs.readFileSync(path.join(SCRIPTS, 'scrape.ts'), 'utf8');
-  assert.match(props, /--store-file/);
-  assert.match(scrape, /--harvest-file/);
-  // And SKILL.md must tell the agent to use them.
+  assert.match(props, /--request/);
+  assert.match(scrape, /takeRequest/);
+  assert.ok(!/--store-file|--harvest-file/.test(props + scrape), 'one transport, not three');
+
   const skill = fs.readFileSync(path.join(BUNDLE, 'SKILL.md'), 'utf8');
-  assert.match(skill, /--store-file/, 'SKILL.md must pass the store by path');
-  assert.match(skill, /--harvest-file/, 'and the harvest payload too');
+  for (const fence of skill.matchAll(/```sh\n([\s\S]*?)```/g)) {
+    for (const line of fence[1].split('\n')) {
+      if (!/(properties|scrape)\.ts/.test(line)) continue;
+      assert.match(line, /--request/, `local transforms take a request file: ${line.trim()}`);
+      assert.ok(!/'/.test(line), `no quoted value may reach a shell: ${line.trim()}`);
+    }
+  }
 });
 
 test('the launchd job binds the file server to loopback only', () => {

@@ -128,18 +128,30 @@ Pass it as the `expression` field of a `plow_browser` `eval`. It returns
 
 **6. Transform it — here, in your own container.**
 
-Write the eval result and the store to files first, then pass the paths:
+Write one request file, then pass its path:
 
-```sh
-node scripts/scrape.ts --harvest-file /tmp/harvest.json '<listing-url>' --store-file /tmp/data.js
+```json
+{
+  "harvest": "<the eval result, as a string>",
+  "url": "<listing-url>",
+  "store": "<the data.js contents>",
+  "photoOnDisk": false
+}
 ```
 
-**Never pass either as a quoted argument.** The harvest payload is a listing
-page's own JSON-LD and the store contains the user's notes, so both can hold
-any byte — an apostrophe ends the quote and the rest becomes command syntax in
-your own container. A path cannot do that: you choose it, and nothing parses
-its contents as a shell word. The listing URL is fine inline; it has already
-been validated as http(s).
+```sh
+node scripts/scrape.ts --request /tmp/request.json
+```
+
+**Nothing goes in as a shell word.** The harvest payload is a listing page's
+own JSON-LD, the store holds the user's notes, and the URL was pasted — any of
+them can contain an apostrophe that ends a quote and turns the rest into
+command syntax in your own container. The URL cannot be validated first
+either: by then the shell has already parsed it. A path you chose is the only
+value here that is yours.
+
+Set `photoOnDisk` to `true` only when refreshing a property whose photo file is
+already on the Mac.
 
 Add `--photo-on-disk` when you are refreshing a property whose photo file is
 already on the Mac. Leaving it off costs a re-fetch; claiming it wrongly leaves
@@ -210,17 +222,20 @@ site. Never supply a value you could not measure.
 
 Read the store, transform, write it back — the same three moves.
 
-Write the store to a file first, then pass the path — the same reason as above,
-and the user's own notes are in it:
+One request file again — the user's own notes are in the store, and a note is
+whatever they typed:
+
+```json
+{ "verb": "list", "json": true,  "store": "<contents>" }
+{ "verb": "get",  "id": "<id>",  "store": "<contents>" }
+{ "verb": "set",  "id": "<id>", "field": "rating", "value": "4", "store": "<contents>" }
+{ "verb": "set",  "id": "<id>", "field": "status", "value": "toured", "store": "<contents>" }
+{ "verb": "set",  "id": "<id>", "field": "notes", "value": "needs a new roof", "store": "<contents>" }
+{ "verb": "rm",   "id": "<id>",  "store": "<contents>" }
+```
 
 ```sh
-node scripts/properties.ts list --store-file /tmp/data.js
-node scripts/properties.ts list --json --store-file /tmp/data.js
-node scripts/properties.ts get <id> --store-file /tmp/data.js
-node scripts/properties.ts set <id> rating 4 --store-file /tmp/data.js
-node scripts/properties.ts set <id> status toured --store-file /tmp/data.js
-node scripts/properties.ts set <id> notes needs a new roof --store-file /tmp/data.js
-node scripts/properties.ts rm <id> --store-file /tmp/data.js
+node scripts/properties.ts --request /tmp/request.json
 ```
 
 `list` and `get` only read, so there is nothing to write back. `set` and `rm`
@@ -236,8 +251,9 @@ anything itself:
 `status` is free text; `new`, `interested`, `toured`, and `passed` are the ones
 the map colours. `rating` is 1–5.
 
-The user's words go in as their own array elements, exactly as they said them.
-An apostrophe needs nothing done to it.
+The user's words go into the request file as a JSON value, exactly as they said
+them. An apostrophe, a quote, a backtick, a semicolon — none of it is ever
+parsed as a shell word.
 
 Match loosely and confirm: *"the one on Elm"* means read `list --json` and find
 it. If two could match, ask which.
