@@ -8,6 +8,7 @@
 // downloads the hero photo.
 import * as net from 'node:net';
 import * as dns from 'node:dns/promises';
+import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 import { extractScraped, geocodeQuery } from './extract.ts';
@@ -295,9 +296,18 @@ export function keepPreviousEnrichment(
 
 async function main(): Promise<void> {
   const { rest, text } = takeStore(process.argv.slice(2));
-  const url = rest[0] === '--harvest' ? (rest[2] ?? '') : '';
+
+  // --harvest-file for the same reason as --store-file: the payload is a
+  // listing page's own JSON-LD, so it can contain any byte, and a shell-quoted
+  // argument lets an apostrophe in it become command syntax in this container.
+  const fileAt = rest.indexOf('--harvest-file');
+  const harvestText =
+    fileAt !== -1 && rest[fileAt + 1] !== undefined
+      ? readFileSync(rest[fileAt + 1], 'utf8')
+      : (rest[1] ?? '');
+  const url = fileAt !== -1 ? (rest[fileAt + 2] ?? '') : rest[0] === '--harvest' ? (rest[2] ?? '') : '';
   if (!storableUrl(url)) {
-    toolError("usage: node scrape.ts --harvest '<eval-result-json>' '<listing-url>' --store '<data.js>'");
+    toolError('usage: node scrape.ts --harvest-file <path> <listing-url> --store-file <path>');
     return;
   }
 
@@ -310,7 +320,7 @@ async function main(): Promise<void> {
   let page: PageSurfaces;
   let settled: boolean;
   try {
-    ({ page, settled } = parseHarvest(rest[1] ?? '', url));
+    ({ page, settled } = parseHarvest(harvestText, url));
   } catch (err) {
     // The caller's payload, not the page — another poll changes nothing.
     return toolError((err as Error).message);

@@ -71,7 +71,15 @@ The marker PNGs in `references/frontend/vendor/images/` are **not** copied. The
 map draws its own pins from the property photos, so Leaflet never asks for
 them.
 
-Finally write an empty store, once:
+Finally the store — **only if there is not one already.** Check first:
+
+```json
+{ "tool": "plow_read_file", "path": "/Users/<user>/Plow/properties/data.js" }
+```
+
+If that succeeds, stop: the user has properties and this file is all of them.
+Writing an empty store over it erases every house they have saved, and nothing
+here can get them back. Only when the read fails:
 
 ```json
 { "path": "/Users/<user>/Plow/properties/data.js", "content": "window.PROPERTIES =\n[]\n" }
@@ -120,9 +128,18 @@ Pass it as the `expression` field of a `plow_browser` `eval`. It returns
 
 **6. Transform it — here, in your own container.**
 
+Write the eval result and the store to files first, then pass the paths:
+
 ```sh
-node scripts/scrape.ts --harvest '<the eval result>' '<listing-url>' --store '<the data.js contents>'
+node scripts/scrape.ts --harvest-file /tmp/harvest.json '<listing-url>' --store-file /tmp/data.js
 ```
+
+**Never pass either as a quoted argument.** The harvest payload is a listing
+page's own JSON-LD and the store contains the user's notes, so both can hold
+any byte — an apostrophe ends the quote and the rest becomes command syntax in
+your own container. A path cannot do that: you choose it, and nothing parses
+its contents as a shell word. The listing URL is fine inline; it has already
+been validated as http(s).
 
 Add `--photo-on-disk` when you are refreshing a property whose photo file is
 already on the Mac. Leaving it off costs a re-fetch; claiming it wrongly leaves
@@ -132,12 +149,21 @@ a pin pointing at nothing.
 
 ```json
 {
-  "command": ["curl", "--resolve", "<fetch.resolve>", "--max-redirs", "0", "-fsSL", "-o", "<fetch.path>", "<fetch.url>"],
+  "command": ["/bin/sh", "-c", "curl --resolve \"$1\" --max-redirs 0 --max-filesize 20000000 -fsSL -o \"$2.part\" \"$3\" && mv \"$2.part\" \"$2\"", "sh", "<fetch.resolve>", "<fetch.path>", "<fetch.url>"],
   "cwd": "/Users/<user>/Plow/properties",
   "network": true,
   "writes": ["/Users/<user>/Plow/properties/photos"]
 }
 ```
+
+The values go in as **separate argv elements** and are referenced as `$1 $2 $3`,
+never pasted into the command string — the URL comes from the listing page.
+
+Three things beyond the two flags. It downloads to `.part` and moves only on
+success, so an interrupted transfer cannot leave a truncated image or destroy
+the previous good one. `--max-filesize 20000000` caps what a listing can put on
+the user's disk. And `-f` makes an HTTP error a failure rather than a saved
+error page.
 
 **Both flags are required, and neither is stylistic.** The photo URL comes from
 the listing page, so it is not the user's text and not yours. `--resolve` pins
@@ -184,14 +210,17 @@ site. Never supply a value you could not measure.
 
 Read the store, transform, write it back — the same three moves.
 
+Write the store to a file first, then pass the path — the same reason as above,
+and the user's own notes are in it:
+
 ```sh
-node scripts/properties.ts list --store '<contents>'
-node scripts/properties.ts list --json --store '<contents>'
-node scripts/properties.ts get <id> --store '<contents>'
-node scripts/properties.ts set <id> rating 4 --store '<contents>'
-node scripts/properties.ts set <id> status toured --store '<contents>'
-node scripts/properties.ts set <id> notes needs a new roof --store '<contents>'
-node scripts/properties.ts rm <id> --store '<contents>'
+node scripts/properties.ts list --store-file /tmp/data.js
+node scripts/properties.ts list --json --store-file /tmp/data.js
+node scripts/properties.ts get <id> --store-file /tmp/data.js
+node scripts/properties.ts set <id> rating 4 --store-file /tmp/data.js
+node scripts/properties.ts set <id> status toured --store-file /tmp/data.js
+node scripts/properties.ts set <id> notes needs a new roof --store-file /tmp/data.js
+node scripts/properties.ts rm <id> --store-file /tmp/data.js
 ```
 
 `list` and `get` only read, so there is nothing to write back. `set` and `rm`

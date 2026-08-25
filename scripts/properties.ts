@@ -6,6 +6,7 @@
 // so the agent is the transport: it reads data.js through Latch, runs one of
 // these, and writes the result back. Keeping the logic in one pinned place is
 // the point — a second copy on the Mac is what drifted before.
+import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 import { loadStore, removeProperty, serializeStore, setMine, MINE_FIELDS } from './store.ts';
@@ -48,10 +49,25 @@ export function envelope(e: Envelope): string {
  * an empty store would print a valid-looking envelope whose write discards
  * every property the operator has.
  */
-export function takeStore(argv: string[]): { rest: string[]; text: string } {
+export function takeStore(argv: string[], read: (p: string) => string = readFileSync): {
+  rest: string[];
+  text: string;
+} {
+  const fileAt = argv.indexOf('--store-file');
+  if (fileAt !== -1 && argv[fileAt + 1] !== undefined) {
+    // The preferred form. The store and the harvest payload are both large and
+    // partly attacker-controlled — a listing's JSON-LD can contain any byte —
+    // so passing them as shell-quoted arguments lets an apostrophe end the
+    // quote and the rest become command syntax. A path cannot: the agent
+    // chooses it, and its contents are never parsed by a shell.
+    return {
+      rest: [...argv.slice(0, fileAt), ...argv.slice(fileAt + 2)],
+      text: read(argv[fileAt + 1]),
+    };
+  }
   const at = argv.indexOf('--store');
   if (at === -1 || argv[at + 1] === undefined) {
-    throw new Error(`missing --store <contents of data.js>\n\n${USAGE}`);
+    throw new Error(`missing --store-file <path> (or --store <contents>)\n\n${USAGE}`);
   }
   return { rest: [...argv.slice(0, at), ...argv.slice(at + 2)], text: argv[at + 1] };
 }

@@ -98,10 +98,18 @@ test('no doc still tells the agent to escape a shell', () => {
   }
 });
 
-test('no script reaches a filesystem', () => {
-  // The shape this repo now commits to: the Mac holds the data, this repo holds
-  // the logic, and nothing here bridges them. An fs call is exactly how a second
-  // copy of the state creeps back in — which is what drifted before.
+test('no script reaches the store or the photos', () => {
+  // The shape this repo commits to: the Mac holds the state, this repo holds
+  // the logic, and nothing here bridges them. A write, a stat, or a directory
+  // read is how a second copy of that state creeps back in — which is what
+  // drifted before.
+  //
+  // Reading an input file is not that. The agent writes the store and the
+  // harvest payload to paths of its own choosing and passes the paths, because
+  // both can contain any byte a listing page cares to emit and a shell-quoted
+  // argument would let an apostrophe become command syntax. Receiving state
+  // through a path is still receiving it.
+  const forbidden = /\bfs\.(write|append|mkdir|rm|unlink|rename|exists|stat|readdir|copy|open)\w*/;
   const offenders: string[] = [];
   for (const name of fs.readdirSync(SCRIPTS).filter((n) => n.endsWith('.ts') && !n.endsWith('.test.ts'))) {
     fs.readFileSync(path.join(SCRIPTS, name), 'utf8')
@@ -109,10 +117,25 @@ test('no script reaches a filesystem', () => {
       .forEach((line, i) => {
         const t = line.trim();
         if (t.startsWith('//') || t.startsWith('*') || t.startsWith('/*')) return;
-        if (/\bfs\.\w+|from 'node:fs'/.test(line)) offenders.push(`${name}:${i + 1} — ${t.slice(0, 60)}`);
+        if (forbidden.test(line)) offenders.push(`${name}:${i + 1} — ${t.slice(0, 60)}`);
       });
   }
-  assert.deepEqual(offenders, [], 'these still touch a filesystem');
+  assert.deepEqual(offenders, [], 'these reach the state rather than receiving it');
+});
+
+test('the store and the harvest payload can arrive as paths', () => {
+  // The injection surface this closes: a listing page's JSON-LD is
+  // attacker-controlled and goes into the transform. As a shell-quoted
+  // argument, an apostrophe in it ends the quote and the rest is command
+  // syntax in the agent's own container.
+  const props = fs.readFileSync(path.join(SCRIPTS, 'properties.ts'), 'utf8');
+  const scrape = fs.readFileSync(path.join(SCRIPTS, 'scrape.ts'), 'utf8');
+  assert.match(props, /--store-file/);
+  assert.match(scrape, /--harvest-file/);
+  // And SKILL.md must tell the agent to use them.
+  const skill = fs.readFileSync(path.join(BUNDLE, 'SKILL.md'), 'utf8');
+  assert.match(skill, /--store-file/, 'SKILL.md must pass the store by path');
+  assert.match(skill, /--harvest-file/, 'and the harvest payload too');
 });
 
 test('the launchd job binds the file server to loopback only', () => {
@@ -135,17 +158,27 @@ test('the launchd job binds the file server to loopback only', () => {
   assert.ok(!args.includes('/usr/bin/python3'), 'and never hardcoded');
 });
 
-test('SKILL.md keeps both guards on the photo fetch', () => {
-  // These two flags are the only thing between an attacker-controlled og:image
-  // and a probe of the user's tailnet and LAN, because photoDirective
-  // deliberately stopped doing the fetch itself. The invariant lives in prose,
-  // so it is pinned here the way the harvest expression is — otherwise a
-  // rewrite drops a flag and the suite stays green.
-  const skill = fs.readFileSync(path.join(BUNDLE, 'SKILL.md'), 'utf8');
-  const block = skill.slice(skill.indexOf('"curl"'), skill.indexOf('"curl"') + 400);
-  assert.notEqual(skill.indexOf('"curl"'), -1, 'SKILL.md must show the fetch command');
-  assert.match(block, /"--resolve"/, 'the vetted address must be pinned');
-  assert.match(block, /"--max-redirs",\s*"0"/, 'unvetted redirect hops must be refused');
+test('SKILL.md keeps every guard on the photo fetch', () => {
+  // These are the only things between an attacker-controlled og:image and the
+  // user's Mac, because photoDirective deliberately stopped doing the fetch
+  // itself. The invariant lives in prose, so it is pinned here the way the
+  // harvest expression is — otherwise a rewrite drops one and CI stays green.
+  const fetch = skillCommands().find((c) => c.includes('curl'));
+  assert.ok(fetch, 'SKILL.md must show the fetch command');
+
+  assert.match(fetch, /--resolve/, 'pin the address that was vetted');
+  assert.match(fetch, /--max-redirs 0/, 'refuse hops nobody vetted');
+  assert.match(fetch, /--max-filesize/, 'cap what a listing can put on the disk');
+  assert.match(fetch, /\.part/, 'stage the download');
+  assert.match(fetch, /mv /, 'and move it into place only on success');
+
+  // The URL comes from the listing page, so it is passed as an argv element
+  // and referenced positionally — never interpolated into the command string.
+  assert.match(fetch, /"\$1"|\$1/, 'values are referenced positionally');
+  assert.ok(
+    !/curl[^"]*<fetch\.url>/.test(fetch),
+    'the URL must not be pasted into the command string',
+  );
 });
 
 
