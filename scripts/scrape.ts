@@ -42,6 +42,102 @@ function note(message: string): void {
 }
 
 /**
+ * The JS the agent hands to latch's `plow_browser` eval.
+ *
+ * It polls INSIDE the page because `goto` resolves while a listing is still a
+ * client-side shell, and reading that shell looks exactly like a bot wall. The
+ * deadline is 10s rather than the 45s the in-process loop used: `plow_browser`
+ * is non-deferrable and latch's call budget is 15s, so a longer poll is killed
+ * mid-flight. The agent re-runs this up to three times, which restores the
+ * original budget.
+ *
+ * `settled` is the load-bearing part. It says which exit the poll took —
+ * predicate satisfied, or deadline reached — so the caller can tell "this page
+ * had not finished rendering" from "this page does not carry that field"
+ * without guessing from the error text. SKILL.md carries this string verbatim
+ * and a test pins the two together.
+ */
+export const HARVEST_EXPRESSION =
+  `(async () => { ` +
+  `const read = () => ({ ` +
+  `jsonld: [...document.querySelectorAll('script[type="application/ld+json"]')].map(s => s.textContent), ` +
+  `og: Object.fromEntries([...document.querySelectorAll('meta[property^="og:"], meta[name^="twitter:"]')]` +
+  `.map(m => [m.getAttribute('property') || m.getAttribute('name'), m.content || ''])) ` +
+  `}); ` +
+  `const deadline = Date.now() + 10000; ` +
+  `let seen = read(); ` +
+  `while (Date.now() < deadline) { ` +
+  `if (seen.jsonld.length && Object.keys(seen.og).length) return { ...seen, settled: true }; ` +
+  `await new Promise(r => setTimeout(r, 750)); ` +
+  `seen = read(); ` +
+  `} ` +
+  `return { ...seen, settled: false }; ` +
+  `})()`;
+
+/**
+ * The agent hands back raw JSON-LD *text*, exactly as the page carries it, so
+ * the tolerant parse lives here rather than in the page: one malformed block is
+ * normal and the others still carry the listing.
+ *
+ * A payload with no `settled` reads as NOT settled. That is the safe direction:
+ * it costs a retry that may not have been needed, where the other reading
+ * suppresses a retry the page still needed.
+ */
+export function parseHarvest(raw: string, url: string): { page: PageSurfaces; settled: boolean } {
+  let payload: unknown;
+  try {
+    payload = JSON.parse(raw);
+  } catch {
+    throw new Error('harvest payload is not JSON — pass the eval result through unchanged');
+  }
+  const shape = payload as { jsonld?: unknown; og?: unknown; settled?: unknown };
+  if (!Array.isArray(shape.jsonld)) throw new Error("harvest payload has no 'jsonld' array");
+  if (!shape.og || typeof shape.og !== 'object' || Array.isArray(shape.og)) {
+    throw new Error("harvest payload has no 'og' object");
+  }
+  const jsonld: unknown[] = [];
+  for (const text of shape.jsonld) {
+    try {
+      jsonld.push(JSON.parse(String(text)));
+    } catch {
+      // A single malformed block is normal; the others still carry the listing.
+    }
+  }
+  return { page: { url, jsonld, og: shape.og as Record<string, string> }, settled: shape.settled === true };
+}
+
+/**
+ * Did this page fail because it had not finished rendering, or because it does
+ * not carry the field at all?
+ *
+ * The in-process loop answered that with time: it polled for 45s and gave up at
+ * the deadline. The in-page poll answers it the same way and reports which exit
+ * it took, so this reads a measurement rather than inferring intent from the
+ * error text — a missing field on a half-mounted page and on a finished one
+ * raise the identical message.
+ */
+function reportHarvestFailure(url: string, settled: boolean, problem: string): void {
+  const missingField = /is required|could not find an address|no usable characters/.test(problem);
+  if (settled && missingField) {
+    toolError(
+      `read ${url}, but it does not publish a saveable listing. Last problem: ${problem}. ` +
+        'If the page genuinely does not publish that field, try this property on another ' +
+        'listing site — do not supply a value of your own.',
+    );
+    return;
+  }
+  process.stdout.write(
+    `${JSON.stringify({
+      type: 'tool_error',
+      retryable: true,
+      error:
+        `${url} had not rendered a saveable listing when the page was read. ` +
+        `Last problem: ${problem}. Run the eval again and re-run this command — up to three attempts.`,
+    })}\n`,
+  );
+}
+
+/**
  * Read the page's structured surfaces. Deliberately no DOM selectors: only
  * JSON-LD and Open Graph, so a cosmetic redesign can't break the scrape.
  */
@@ -334,9 +430,14 @@ export function keepPreviousEnrichment(
 }
 
 async function main(): Promise<void> {
-  const url = process.argv[2];
+  const harvesting = process.argv[2] === '--harvest';
+  const url = harvesting ? process.argv[4] : process.argv[2];
   if (!url || !/^https?:\/\//i.test(url)) {
-    toolError("usage: node scrape.ts '<listing-url>'");
+    toolError(
+      harvesting
+        ? "usage: node scrape.ts --harvest '<eval-result-json>' '<listing-url>'"
+        : "usage: node scrape.ts '<listing-url>'",
+    );
     return;
   }
 
@@ -347,18 +448,42 @@ async function main(): Promise<void> {
   const dir = resolveDataDir();
   const before = readStore(dir);
 
-  const { connect } = require('plow-browser');
-  let browser: any;
-  try {
-    browser = connect(process.env.CAMOUFOX_RPC_ENDPOINT);
-  } catch (err) {
-    if ((err as Error & { name?: string })?.name === 'BrowserNotConnected') {
-      return toolError('browser unavailable: endpoint not provisioned — enable Plow Browser in Settings');
+  let scraped: Scraped;
+  let photoUrl: string | null;
+
+  if (harvesting) {
+    let page: PageSurfaces;
+    let settled: boolean;
+    try {
+      ({ page, settled } = parseHarvest(process.argv[3] ?? '', url));
+    } catch (err) {
+      // The caller's payload, not the page — another poll changes nothing.
+      return toolError((err as Error).message);
     }
-    throw err;
+    try {
+      const extracted = extractScraped(page);
+      // The same rules `upsert` applies, so anything unsaveable fails here,
+      // before the geocode and photo download that would otherwise leave an
+      // orphaned image named for a slug no row will ever carry.
+      scraped = coerceScraped(extracted.scraped);
+      photoUrl = extracted.photoUrl;
+    } catch (err) {
+      return reportHarvestFailure(url, settled, (err as Error).message);
+    }
+  } else {
+    const { connect } = require('plow-browser');
+    let browser: any;
+    try {
+      browser = connect(process.env.CAMOUFOX_RPC_ENDPOINT);
+    } catch (err) {
+      if ((err as Error & { name?: string })?.name === 'BrowserNotConnected') {
+        return toolError('browser unavailable: endpoint not provisioned — enable Plow Browser in Settings');
+      }
+      throw err;
+    }
+    ({ scraped, photoUrl } = await scrapeRendered(browser, url));
   }
 
-  const { scraped, photoUrl } = await scrapeRendered(browser, url);
   const id = slugify(scraped);
 
   // Neither of the next two failures should lose the listing: a property with

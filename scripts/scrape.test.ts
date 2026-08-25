@@ -8,8 +8,10 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import {
+  HARVEST_EXPRESSION,
   isPrivateAddress,
   keepPreviousEnrichment,
+  parseHarvest,
   resolvePublicDestination,
   scrapeRendered,
 } from './scrape.ts';
@@ -243,4 +245,128 @@ test('a carried-forward photo must still exist on disk', () => {
   const second = { lat: 1, lng: 2, photo: null } as unknown as Scraped;
   assert.deepEqual(keepPreviousEnrichment(second, previous, dir), ['photo']);
   assert.equal(second.photo, 'photos/gone.jpg');
+});
+
+// --- the latch-backed harvest path -----------------------------------------
+
+test('the harvest expression reads the same two surfaces the store needs', () => {
+  // Pinned as strings because SKILL.md and the howto page both carry this
+  // expression verbatim; a silent edit here desynchronises three copies.
+  assert.match(HARVEST_EXPRESSION, /script\[type="application\/ld\+json"\]/);
+  assert.match(HARVEST_EXPRESSION, /meta\[property\^="og:"\], meta\[name\^="twitter:"\]/);
+  assert.match(HARVEST_EXPRESSION, /10000/, 'in-page deadline, inside latch 15s call budget');
+  assert.match(HARVEST_EXPRESSION, /750/, 'poll interval, same as the loop this replaces');
+  assert.match(HARVEST_EXPRESSION, /settled/, 'reports whether it returned by predicate or by deadline');
+  assert.doesNotMatch(HARVEST_EXPRESSION, /\n/, 'travels as one JSON string field');
+});
+
+test('a malformed json-ld block does not lose the listing', () => {
+  const { page } = parseHarvest(
+    JSON.stringify({ jsonld: ['{not json', JSON.stringify(RESIDENCE)], og: FULL_OG, settled: true }),
+    URL_,
+  );
+  assert.equal(page.url, URL_);
+  assert.equal(page.jsonld.length, 1, 'the parseable block survives its broken neighbour');
+  assert.equal(page.og['og:title'], FULL_OG['og:title']);
+});
+
+test('parseHarvest reports whether the page settled or timed out', () => {
+  const base = { jsonld: [], og: {} };
+  assert.equal(parseHarvest(JSON.stringify({ ...base, settled: true }), URL_).settled, true);
+  assert.equal(parseHarvest(JSON.stringify({ ...base, settled: false }), URL_).settled, false);
+  // An older payload with no flag must not silently read as "fully rendered" —
+  // that is the reading that would suppress a retry the page still needs.
+  assert.equal(parseHarvest(JSON.stringify(base), URL_).settled, false, 'absent means not settled');
+});
+
+function initStore(): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'property-hunt-harvest-'));
+  execFileSync(process.execPath, [fileURLToPath(new URL('./properties.ts', import.meta.url)), 'init'], {
+    env: { ...process.env, PROPERTY_HUNT_DIR: dir },
+    encoding: 'utf8',
+  });
+  return dir;
+}
+
+function harvestInto(dir: string, payload: unknown, url: string = URL_): string {
+  return execFileSync(
+    process.execPath,
+    [
+      fileURLToPath(new URL('./scrape.ts', import.meta.url)),
+      '--harvest',
+      typeof payload === 'string' ? payload : JSON.stringify(payload),
+      url,
+    ],
+    { env: { ...process.env, PROPERTY_HUNT_DIR: dir }, encoding: 'utf8' },
+  );
+}
+
+test('--harvest saves a listing without touching a browser', () => {
+  const dir = initStore();
+  const out = harvestInto(dir, {
+    jsonld: [JSON.stringify(RESIDENCE)],
+    og: FULL_OG,
+    settled: true,
+  });
+
+  assert.match(out, /^added /, 'prints the same verb the browser path printed');
+  const store = fs.readFileSync(path.join(dir, 'data.js'), 'utf8');
+  assert.match(store, /424 28th St/);
+  assert.match(store, /"zip": "94131"/, 'the zip came from og:title, as it does in production');
+});
+
+test('a page that had not finished rendering is retryable, and writes nothing', () => {
+  const dir = initStore();
+  const before = fs.readFileSync(path.join(dir, 'data.js'), 'utf8');
+
+  // The exact shape the old in-process loop retried and then succeeded on:
+  // JSON-LD mounted without a postalCode, og:title not yet there. The eval hit
+  // its deadline rather than settling, which is what makes it worth another go.
+  const payload = JSON.parse(
+    harvestInto(dir, { jsonld: [JSON.stringify(RESIDENCE)], og: {}, settled: false }).trim(),
+  );
+
+  assert.equal(payload.type, 'tool_error');
+  assert.equal(payload.retryable, true, 'the eval timed out mid-render — one more poll is the fix');
+  assert.match(payload.error, /zip is required/, 'names the actual blocker');
+  assert.equal(
+    fs.readFileSync(path.join(dir, 'data.js'), 'utf8'),
+    before,
+    'a failed harvest leaves the store byte-identical',
+  );
+});
+
+test('a settled page missing a required field is not retryable, and says to try another site', () => {
+  const dir = initStore();
+  // Both surfaces mounted inside the deadline, and the address still is not
+  // there: polling this same page again returns this same payload forever.
+  const payload = JSON.parse(
+    harvestInto(dir, {
+      jsonld: [],
+      og: { 'og:title': 'Listings near you', 'og:description': 'Browse homes for sale' },
+      settled: true,
+    }).trim(),
+  );
+
+  assert.equal(payload.type, 'tool_error');
+  assert.ok(!payload.retryable, 'polling a settled page again cannot produce an address');
+  assert.match(payload.error, /another listing site/, 'offers the remedy that can actually work');
+});
+
+test('--harvest rejects a payload that is not the two surfaces', () => {
+  const dir = initStore();
+  for (const bad of ['not json at all', '{"og":{}}', '{"jsonld":"a string","og":{}}']) {
+    const payload = JSON.parse(harvestInto(dir, bad).trim());
+    assert.equal(payload.type, 'tool_error', `rejected: ${bad}`);
+    assert.ok(!payload.retryable, 'a malformed payload is the caller to fix, not the page');
+  }
+});
+
+test('--harvest refuses a url that is not one', () => {
+  const dir = initStore();
+  const payload = JSON.parse(
+    harvestInto(dir, { jsonld: [], og: {}, settled: true }, 'not-a-url').trim(),
+  );
+  assert.equal(payload.type, 'tool_error');
+  assert.match(payload.error, /--harvest/, 'the usage line names the mode actually being used');
 });
