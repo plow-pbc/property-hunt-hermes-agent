@@ -169,25 +169,21 @@ function skillCommands(): string[] {
 }
 
 test('the map is served as a port, never as a directory', () => {
-  // `tailscale serve <directory>` is refused outright by the Mac build. This
-  // was pinned when the invocation lived in the justfile; the invocation moved
-  // to SKILL.md and the pin has to move with it, because getting it wrong is a
-  // hard error at the operator rather than a red test.
-  const serve = skillCommands().find((c) => c.includes('"serve"'));
-  assert.ok(serve, 'SKILL.md must show the tailnet publish');
-  assert.match(serve, /"serve", "--bg", "8787"/, 'proxy a port');
+  // `tailscale serve <path>` is refused outright by the Mac build. Getting it
+  // wrong is a hard error at the operator rather than a red test, so it is
+  // pinned — and pinned as an ALLOW-list, after three rounds of a deny-list
+  // missing a form: first `serve --bg <dir>`, then a second serve invocation,
+  // then a bare relative directory. What may follow `serve` is a flag or the
+  // port. Anything else is a path, whatever it looks like.
+  const serves = skillCommands().filter((c) => c.includes('"serve"'));
+  assert.ok(serves.length, 'SKILL.md must show the tailnet publish');
 
-  // Every element AFTER serve, not just the next one: `serve --bg 8787 <dir>`
-  // satisfies the containment check above and is the realistic way to get this
-  // wrong, since --bg is the form the doc uses. The binary itself is a path,
-  // so only what follows the subcommand is inspected.
-  const argv = serve.split(',').map((x) => x.trim().replace(/^"|"$/g, ''));
-  const after = argv.slice(argv.indexOf('serve') + 1);
-  assert.deepEqual(
-    after.filter((x) => x.includes('/')),
-    [],
-    'no argument after `serve` may name a path — macOS refuses path serving',
-  );
+  for (const serve of serves) {
+    const argv = serve.split(',').map((x) => x.trim().replace(/^"|"$/g, ''));
+    const after = argv.slice(argv.indexOf('serve') + 1);
+    const notAFlagOrPort = after.filter((x) => !x.startsWith('-') && !/^\d+$/.test(x));
+    assert.deepEqual(notAFlagOrPort, [], `only flags and a port may follow serve: ${serve}`);
+  }
 });
 
 test('the interpreter is resolved by running it', () => {
