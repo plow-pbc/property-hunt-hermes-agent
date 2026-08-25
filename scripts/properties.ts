@@ -1,73 +1,63 @@
 #!/usr/bin/env node
-// The store CLI: reading, and editing the fields the user owns. Adding and
-// refreshing belong to scrape.ts, which writes the store itself. Between them
-// they are the only writers — nothing hand-edits data.js, which is what keeps
-// every write atomic and scraped values honest about where they came from.
-import * as fs from 'node:fs';
-import * as path from 'node:path';
-import * as os from 'node:os';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+// The store CLI, as a pure transform. Every command takes the store's text and
+// prints what should replace it; nothing here reads or writes a file.
+//
+// The store lives on the operator's Mac and this runs in the agent's container,
+// so the agent is the transport: it reads data.js through Latch, runs one of
+// these, and writes the result back. Keeping the logic in one pinned place is
+// the point — a second copy on the Mac is what drifted before.
+import { pathToFileURL } from 'node:url';
 
-import { emptyStoreText, readStore, removeProperty, setMine, writeStore, MINE_FIELDS } from './store.ts';
+import { loadStore, removeProperty, serializeStore, setMine, MINE_FIELDS } from './store.ts';
 import type { Property } from './store.ts';
 
-const BUNDLE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const FRONTEND_TEMPLATE = path.join(BUNDLE_ROOT, 'references', 'frontend');
+/** What the agent has to do on the Mac after a transform. */
+export type Fetch = { url: string; resolve: string; path: string };
 
-const USAGE = `property-hunt store
+export type Envelope = {
+  store?: string;
+  fetch?: Fetch;
+  remove?: string[];
+  id?: string;
+  verb?: string;
+  notes?: string[];
+};
 
-  init                              scaffold the properties folder (idempotent)
-  list [--json]                     every property
-  get <id>                          one property as JSON
-  set <id> <field> <value>          ${MINE_FIELDS.join(' | ')}
-  rm <id>                           delete the property and its photo
-  where                             print the folder being used
+/**
+ * One envelope per mutating command, on stdout. Absent keys mean "nothing to
+ * do" rather than an empty value, so the agent branches on presence.
+ */
+export function envelope(e: Envelope): string {
+  return `${JSON.stringify(e)}\n`;
+}
+
+/**
+ * The store text, from `--store`. Absent is fatal, deliberately: defaulting to
+ * an empty store would print a valid-looking envelope whose write discards
+ * every property the operator has.
+ */
+export function takeStore(argv: string[]): { rest: string[]; text: string } {
+  const at = argv.indexOf('--store');
+  if (at === -1 || argv[at + 1] === undefined) {
+    throw new Error(`missing --store <contents of data.js>\n\n${USAGE}`);
+  }
+  return { rest: [...argv.slice(0, at), ...argv.slice(at + 2)], text: argv[at + 1] };
+}
+
+const USAGE = `property-hunt store — every command takes --store
+
+  list [--json]   --store <data.js>          every property
+  get <id>        --store <data.js>          one property as JSON
+  set <id> <field> <value> --store <data.js> ${MINE_FIELDS.join(' | ')}
+  rm <id>         --store <data.js>          drop it, and name its photo
 
 Adding and refreshing a property is a separate command — see SKILL.md.
 
-The data folder is $PROPERTY_HUNT_DIR, else ~/Plow/properties.
+--store takes the CONTENTS of data.js, not a path. Mutating commands print a
+JSON envelope: the new store, plus anything the agent must do on the Mac.
 
 Values are passed as separate arguments, never concatenated into one string, so
 an apostrophe in a note needs no escaping.`;
-
-/**
- * Resolve the data folder. Everything runs on the user's own Mac now, so there
- * is one real answer and one override the tests use.
- */
-export function resolveDataDir(env: NodeJS.ProcessEnv = process.env): string {
-  const override = env.PROPERTY_HUNT_DIR?.trim();
-  if (override) return path.resolve(override);
-  return path.join(os.homedir(), 'Plow', 'properties');
-}
-
-function copyTree(from: string, to: string): void {
-  fs.mkdirSync(to, { recursive: true });
-  for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
-    const src = path.join(from, entry.name);
-    const dest = path.join(to, entry.name);
-    if (entry.isDirectory()) copyTree(src, dest);
-    else fs.copyFileSync(src, dest);
-  }
-}
-
-function init(dir: string): void {
-  fs.mkdirSync(path.join(dir, 'photos'), { recursive: true });
-
-  if (!fs.existsSync(FRONTEND_TEMPLATE)) {
-    throw new Error(`bundle is incomplete: no frontend template at ${FRONTEND_TEMPLATE}`);
-  }
-  // The frontend is bundle-owned, so refresh it on every init to pick up skill
-  // upgrades. data.js is user-owned and must survive untouched.
-  copyTree(FRONTEND_TEMPLATE, dir);
-
-  const store = path.join(dir, 'data.js');
-  if (fs.existsSync(store)) {
-    process.stdout.write(`ready: ${dir} (kept ${readStore(dir).length} existing properties)\n`);
-    return;
-  }
-  fs.writeFileSync(store, emptyStoreText());
-  process.stdout.write(`ready: ${dir}\n`);
-}
 
 function requireArg(value: string | undefined, name: string): string {
   if (value === undefined || value === '') throw new Error(`missing <${name}>\n\n${USAGE}`);
@@ -95,23 +85,15 @@ function summarize(row: Property): string {
 }
 
 function main(argv: string[]): void {
-  const [verb, ...rest] = argv;
-  const dir = resolveDataDir();
-
+  const [verb] = argv;
   if (!verb || verb === '--help' || verb === '-h') {
     process.stdout.write(`${USAGE}\n`);
     return;
   }
-  if (verb === 'where') {
-    process.stdout.write(`${dir}\n`);
-    return;
-  }
-  if (verb === 'init') {
-    init(dir);
-    return;
-  }
 
-  const rows = readStore(dir);
+  const { rest: all, text } = takeStore(argv);
+  const rows = loadStore(text);
+  const rest = all.slice(1);
 
   switch (verb) {
     case 'list': {
@@ -131,19 +113,34 @@ function main(argv: string[]): void {
     }
     case 'set': {
       const id = requireArg(rest[0], 'id');
+      // Through findOrThrow so an unknown id lists the ones that exist, the
+      // same as rm. The agent matches loosely — "the one on Elm" — so the ids
+      // it can choose from are the useful half of the error.
+      findOrThrow(rows, id);
       const field = requireArg(rest[1], 'field');
       const value = rest.slice(2).join(' ');
-      const next = setMine(rows, id, field, value);
-      writeStore(dir, next);
-      process.stdout.write(`${id}: ${field} = ${JSON.stringify(value)}\n`);
+      process.stdout.write(
+        envelope({
+          store: serializeStore(setMine(rows, id, field, value)),
+          id,
+          verb: 'updated',
+          notes: [`${field} = ${JSON.stringify(value)}`],
+        }),
+      );
       return;
     }
     case 'rm': {
       const id = requireArg(rest[0], 'id');
       const row = findOrThrow(rows, id);
-      writeStore(dir, removeProperty(rows, id));
-      if (row.scraped.photo) fs.rmSync(path.join(dir, row.scraped.photo), { force: true });
-      process.stdout.write(`removed ${id}\n`);
+      process.stdout.write(
+        envelope({
+          store: serializeStore(removeProperty(rows, id)),
+          id,
+          verb: 'removed',
+          // Named, never deleted here. Nothing in this process reaches the Mac.
+          ...(row.scraped.photo ? { remove: [row.scraped.photo] } : {}),
+        }),
+      );
       return;
     }
     default:

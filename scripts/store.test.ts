@@ -1,15 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import * as fs from 'node:fs';
-import * as os from 'node:os';
-import * as path from 'node:path';
 
 import {
   slugify,
   parseStore,
   serializeStore,
-  readStore,
-  writeStore,
+  loadStore,
   upsertScraped,
   setMine,
   emptyStoreText,
@@ -17,7 +13,7 @@ import {
   removeProperty,
   storableUrl,
 } from './store.ts';
-import type { Scraped } from './store.ts';
+import type { Mine, Scraped } from './store.ts';
 
 // Built THROUGH coerceScraped, not beside it. Assembling the literal directly
 // let the fixture produce a record no real path can: with listing_source
@@ -44,10 +40,6 @@ function scraped(over: Partial<Scraped> = {}): Scraped {
     last_scraped_at: '2026-08-14T19:00:00.000Z',
     ...over,
   });
-}
-
-function tmpdir(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'property-hunt-test-'));
 }
 
 // --- The invariant the whole design rests on -------------------------------
@@ -261,24 +253,18 @@ test('photo can only name a file inside photos/', () => {
 
 // --- Durability -------------------------------------------------------------
 
-test('a write survives a round trip through the filesystem', () => {
-  const dir = tmpdir();
-  fs.writeFileSync(path.join(dir, 'data.js'), emptyStoreText());
-  const rows = upsertScraped(readStore(dir), scraped());
-  writeStore(dir, rows);
-  assert.deepEqual(readStore(dir), rows);
+test('a store survives a round trip through its own text', () => {
+  // The round trip that matters now is text, not a file: the agent reads
+  // data.js on the Mac, this parses it, and serializeStore produces what gets
+  // written back. Nothing in between touches a disk.
+  const rows = upsertScraped(loadStore(emptyStoreText()), scraped());
+  assert.deepEqual(loadStore(serializeStore(rows)), rows);
 });
 
 test('removing a property that is not there fails loudly', () => {
   const rows = upsertScraped([], scraped());
   assert.throws(() => removeProperty(rows, 'no-such-house'), /no property with id/);
   assert.deepEqual(removeProperty(rows, rows[0].id), []);
-});
-
-test('a write leaves no scratch files behind', () => {
-  const dir = tmpdir();
-  writeStore(dir, upsertScraped([], scraped()));
-  assert.deepEqual(fs.readdirSync(dir), ['data.js'], 'the tmp file must be renamed, not left alongside');
 });
 
 test('one rule decides what may be a listing url', () => {
@@ -318,5 +304,24 @@ test('a listing url is stored as the rule wrote it, not as the page spelled it',
     const row = coerceScraped({ ...VALID, listing_url: given });
     assert.equal(row.listing_url, stored, given);
     assert.equal(row.listing_source, 'compass.com', `source derives from the parsed host: ${given}`);
+  }
+});
+
+function mine(over: Partial<Mine> = {}): Mine {
+  return { rating: null, status: 'new', notes: '', added_at: '2026-08-14T19:00:00.000Z', ...over };
+}
+
+test('the store is loaded from text, and blank text is refused', () => {
+  // Blank must not read as "no properties yet". The agent passes the file it
+  // read, so blank means the read failed on the Mac — and treating it as an
+  // empty store would discard every property on the write that follows.
+  const rows = loadStore(serializeStore([{ id: 'x', scraped: scraped(), mine: mine() }]));
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].id, 'x');
+
+  assert.deepEqual(loadStore(emptyStoreText()), [], 'an explicitly empty store is fine');
+
+  for (const blank of ['', '   ', '\n']) {
+    assert.throws(() => loadStore(blank), /empty/i, `refused: ${JSON.stringify(blank)}`);
   }
 });

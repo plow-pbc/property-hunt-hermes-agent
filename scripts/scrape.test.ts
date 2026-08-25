@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import {
@@ -12,8 +12,10 @@ import {
   isPrivateAddress,
   keepPreviousEnrichment,
   parseHarvest,
+  photoDirective,
   resolvePublicDestination,
 } from './scrape.ts';
+import { emptyStoreText, loadStore, serializeStore } from './store.ts';
 import type { Scraped } from './store.ts';
 
 const URL_ = 'https://www.compass.com/homedetails/424-28th-St-San-Francisco-CA-94131/1QUY9H_pid/';
@@ -39,27 +41,33 @@ const FULL_OG = {
   'og:image': 'https://www.compass.com/m/abc/origin.jpg',
 };
 
-test('scraping into an uninitialized folder costs nothing and says what to do', async () => {
-  // The guard runs before anything is parsed, so a good payload still writes
-  // nothing. Without it, readStore raised a bare ENOENT *after* the geocode and
-  // a photo download that had already created photos/ and an orphaned image.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'property-hunt-uninit-'));
-  const out = execFileSync(
-    process.execPath,
-    [
-      fileURLToPath(new URL('./scrape.ts', import.meta.url)),
-      '--harvest',
-      JSON.stringify({ jsonld: [JSON.stringify(RESIDENCE)], og: FULL_OG, settled: true }),
-      URL_,
-    ],
-    { env: { ...process.env, PROPERTY_HUNT_DIR: dir }, encoding: 'utf8' },
-  );
-
-  const payload = JSON.parse(out.trim());
+test('a blank store is refused before anything is parsed', () => {
+  // The guard the old "no store at <dir>" check was: the caller handed us
+  // nothing to work from. Failing here rather than later is what kept a
+  // geocode and a photo download from running against a store that was not
+  // there — now it keeps an envelope from proposing a write that would
+  // discard every property.
+  // scrape.ts reports a failure as a tool RESULT, not a crashed command — the
+  // agent reads it and speaks. So the contract is the payload, not the exit
+  // code: a tool_error and no envelope, meaning nothing to write back.
+  const good = JSON.stringify({ jsonld: [JSON.stringify(RESIDENCE)], og: FULL_OG, settled: true });
+  const payload = JSON.parse(harvest(good, URL_, '').out.trim());
   assert.equal(payload.type, 'tool_error');
-  assert.match(payload.error, /no store at/);
-  assert.match(payload.error, /SKILL\.md/, 'points at the canonical init command rather than a cwd-relative one');
-  assert.deepEqual(fs.readdirSync(dir), [], 'nothing may be written before the store is known to exist');
+  assert.match(payload.error, /empty/i);
+  assert.equal(payload.store, undefined, 'nothing to write back');
+});
+
+test('scrape refuses to run without --store at all', () => {
+  const good = JSON.stringify({ jsonld: [JSON.stringify(RESIDENCE)], og: FULL_OG, settled: true });
+  const r = spawnSync(
+    process.execPath,
+    [fileURLToPath(new URL('./scrape.ts', import.meta.url)), '--harvest', good, URL_],
+    { encoding: 'utf8' },
+  );
+  const payload = JSON.parse(r.stdout.trim());
+  assert.equal(payload.type, 'tool_error');
+  assert.match(payload.error, /--store/);
+  assert.equal(payload.store, undefined);
 });
 
 test('a refresh keeps only the enrichment this run failed to produce', () => {
@@ -94,7 +102,7 @@ test('a refresh keeps only the enrichment this run failed to produce', () => {
       expected: [null, null, null],
     },
   ]) {
-    assert.deepEqual(keepPreviousEnrichment(fresh, previous, dir), kept, name);
+    assert.deepEqual(keepPreviousEnrichment(fresh, previous, false), kept, name);
     assert.deepEqual([fresh.lat, fresh.lng, fresh.photo], expected, name);
   }
 });
@@ -155,22 +163,22 @@ test('the vetted address is returned so the caller can pin to it', async () => {
   assert.equal(resolved.url.hostname, '93.184.216.34');
 });
 
-test('a carried-forward photo must still exist on disk', () => {
+test('a carried-forward photo depends on the caller saying it is there', () => {
   // Caught live: the download broke, the carry-forward kept the old path, and
   // the record pointed at a file that was gone — the map renders that as a
   // broken image, which is worse than the honest plain marker.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'property-hunt-photo-'));
-  fs.mkdirSync(path.join(dir, 'photos'));
-  const fresh = { lat: 1, lng: 2, photo: null } as unknown as Scraped;
+  //
+  // Whether the file is there is the agent's knowledge now: it holds the Mac.
+  // Absent means no, which costs a re-fetch rather than a broken pin.
   const previous = { lat: 1, lng: 2, photo: 'photos/gone.jpg' } as Scraped;
 
-  assert.deepEqual(keepPreviousEnrichment(fresh, previous, dir), [], 'nothing to carry when the file is gone');
-  assert.equal(fresh.photo, null, 'better a plain marker than a broken image');
+  const gone = { lat: 1, lng: 2, photo: null } as unknown as Scraped;
+  assert.deepEqual(keepPreviousEnrichment(gone, previous, false), [], 'nothing carried when it is not there');
+  assert.equal(gone.photo, null, 'better a plain marker than a broken image');
 
-  fs.writeFileSync(path.join(dir, 'photos', 'gone.jpg'), 'bytes');
-  const second = { lat: 1, lng: 2, photo: null } as unknown as Scraped;
-  assert.deepEqual(keepPreviousEnrichment(second, previous, dir), ['photo']);
-  assert.equal(second.photo, 'photos/gone.jpg');
+  const present = { lat: 1, lng: 2, photo: null } as unknown as Scraped;
+  assert.deepEqual(keepPreviousEnrichment(present, previous, true), ['photo']);
+  assert.equal(present.photo, 'photos/gone.jpg');
 });
 
 // --- the latch-backed harvest path -----------------------------------------
@@ -204,40 +212,32 @@ test('parseHarvest reports whether the page settled or timed out', () => {
   assert.equal(parseHarvest(JSON.stringify(base), URL_).settled, false, 'absent means not settled');
 });
 
-function initStore(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'property-hunt-harvest-'));
-  execFileSync(process.execPath, [fileURLToPath(new URL('./properties.ts', import.meta.url)), 'init'], {
-    env: { ...process.env, PROPERTY_HUNT_DIR: dir },
-    encoding: 'utf8',
-  });
-  return dir;
-}
-
-function harvestInto(dir: string, payload: unknown, url: string = URL_): string {
-  return execFileSync(
+/** Run the transform the way the agent does: store in, envelope out. */
+function harvest(payload: unknown, url: string = URL_, store: string = emptyStoreText(), extra: string[] = []) {
+  const r = spawnSync(
     process.execPath,
     [
       fileURLToPath(new URL('./scrape.ts', import.meta.url)),
       '--harvest',
       typeof payload === 'string' ? payload : JSON.stringify(payload),
       url,
+      '--store',
+      store,
+      ...extra,
     ],
-    { env: { ...process.env, PROPERTY_HUNT_DIR: dir }, encoding: 'utf8' },
+    { encoding: 'utf8' },
   );
+  return { out: r.stdout, err: r.stderr, code: r.status ?? 0 };
 }
 
 test('--harvest saves a listing without touching a browser', () => {
-  const dir = initStore();
-  const out = harvestInto(dir, {
-    jsonld: [JSON.stringify(RESIDENCE)],
-    og: FULL_OG,
-    settled: true,
-  });
+  const env = JSON.parse(harvest({ jsonld: [JSON.stringify(RESIDENCE)], og: FULL_OG, settled: true }).out);
 
-  assert.match(out, /^added /, 'prints the same verb the browser path printed');
-  const store = fs.readFileSync(path.join(dir, 'data.js'), 'utf8');
-  assert.match(store, /424 28th St/);
-  assert.match(store, /"zip": "94131"/, 'the zip came from og:title, as it does in production');
+  assert.equal(env.verb, 'added');
+  assert.equal(env.id, '424-28th-st-94131-ca');
+  const rows = loadStore(env.store);
+  assert.equal(rows[0].scraped.address, '424 28th St');
+  assert.equal(rows[0].scraped.zip, '94131', 'the zip came from og:title, as it does in production');
 });
 
 test('whether a failure is worth retrying is decided by how the poll exited', () => {
@@ -270,35 +270,25 @@ test('whether a failure is worth retrying is decided by how the poll exited', ()
       says: /another listing site/,
     },
   ]) {
-    const dir = initStore();
-    const before = fs.readFileSync(path.join(dir, 'data.js'), 'utf8');
-    const result = JSON.parse(harvestInto(dir, payload).trim());
+    const result = JSON.parse(harvest(payload).out.trim());
 
     assert.equal(result.type, 'tool_error', name);
     assert.equal(Boolean(result.retryable), retryable, name);
     assert.match(result.error, says, name);
-    assert.equal(
-      fs.readFileSync(path.join(dir, 'data.js'), 'utf8'),
-      before,
-      `${name}: a failed harvest leaves the store byte-identical`,
-    );
+    assert.equal(result.store, undefined, `${name}: a failed harvest proposes no write`);
   }
 });
 
 test('--harvest rejects a payload that is not the two surfaces', () => {
-  const dir = initStore();
   for (const bad of ['not json at all', '{"og":{}}', '{"jsonld":"a string","og":{}}']) {
-    const payload = JSON.parse(harvestInto(dir, bad).trim());
+    const payload = JSON.parse(harvest(bad).out.trim());
     assert.equal(payload.type, 'tool_error', `rejected: ${bad}`);
     assert.ok(!payload.retryable, 'a malformed payload is the caller to fix, not the page');
   }
 });
 
 test('--harvest refuses a url that is not one', () => {
-  const dir = initStore();
-  const payload = JSON.parse(
-    harvestInto(dir, { jsonld: [], og: {}, settled: true }, 'not-a-url').trim(),
-  );
+  const payload = JSON.parse(harvest({ jsonld: [], og: {}, settled: true }, 'not-a-url').out.trim());
   assert.equal(payload.type, 'tool_error');
   assert.match(payload.error, /--harvest/, 'the usage line names the mode actually being used');
 });
@@ -362,53 +352,63 @@ test('the harvest expression actually runs, and reports which exit it took', asy
   assert.deepEqual(page.jsonld, [{ '@type': 'House' }], 'the two halves agree on the wire format');
 });
 
-test('a photo that cannot be fetched costs the pin its picture, and says so', () => {
-  // The end of the chain the malformed-image fix opened up: extractScraped
-  // hands the bad URL on, downloadPhoto fails on it, and the listing is saved
-  // anyway with the user told why. Asserted here rather than at extract level
-  // because the contract that matters is "the house is on the map, without a
-  // photo" — not what one function returned.
-  const dir = initStore();
-  const run = spawnSync(
-    process.execPath,
-    [
-      fileURLToPath(new URL('./scrape.ts', import.meta.url)),
-      '--harvest',
-      JSON.stringify({
-        jsonld: [JSON.stringify(RESIDENCE)],
-        og: { ...FULL_OG, 'og:image': 'http://[[[bad' },
-        settled: true,
-      }),
-      URL_,
-    ],
-    { env: { ...process.env, PROPERTY_HUNT_DIR: dir }, encoding: 'utf8' },
+test('a photo we cannot vet costs the pin its picture, not the listing', () => {
+  // The end of the chain: extractScraped hands the bad URL on, photoDirective
+  // refuses to emit one for it, and the listing is saved anyway with the user
+  // told why. Asserted end-to-end because the contract that matters is "the
+  // house is on the map, without a photo".
+  const env = JSON.parse(
+    harvest({
+      jsonld: [JSON.stringify(RESIDENCE)],
+      og: { ...FULL_OG, 'og:image': 'http://127.0.0.1/hero.jpg' },
+      settled: true,
+    }).out,
   );
 
-  assert.match(run.stdout, /^added /, 'the listing is saved');
-  assert.match(run.stderr, /photo download failed .* the pin will use a plain marker/);
-  const saved = JSON.parse(fs.readFileSync(path.join(dir, 'data.js'), 'utf8').split('=')[1]);
-  assert.equal(saved.length, 1);
-  assert.equal(saved[0].scraped.photo, null, 'an honest empty photo, not a broken path');
-  assert.equal(saved[0].scraped.address, '424 28th St');
+  assert.equal(env.verb, 'added');
+  assert.equal(env.fetch, undefined, 'no directive, so the agent fetches nothing');
+  assert.ok(
+    env.notes.some((n: string) => /photo unavailable/.test(n)),
+    'and the user is told why',
+  );
+  const rows = loadStore(env.store);
+  assert.equal(rows[0].scraped.photo, null, 'an honest empty photo, not a broken path');
+  assert.equal(rows[0].scraped.address, '424 28th St');
 });
 
 test('a listing linking somewhere that is not the web still lands, on the page url', () => {
   // mailto: and javascript: parse, so a loop that accepted anything parseable
   // took them and then failed the record at coerceScraped — with the page URL,
-  // already validated as http(s), sitting one candidate away. Asserted
-  // end-to-end because the unit boundary is exactly where that hole hid: the
-  // extract-level test passed while the save was discarded.
+  // already validated as http(s), sitting one candidate away.
   for (const url of ['mailto:agent@example.com', 'javascript:void(0)']) {
-    const dir = initStore();
-    const out = harvestInto(dir, {
-      jsonld: [JSON.stringify({ ...RESIDENCE, url })],
-      og: FULL_OG,
-      settled: true,
-    });
+    const env = JSON.parse(
+      harvest({ jsonld: [JSON.stringify({ ...RESIDENCE, url })], og: FULL_OG, settled: true }).out,
+    );
+    assert.equal(env.verb, 'added', `saved despite a ${url} canonical link`);
+    const rows = loadStore(env.store);
+    assert.equal(rows[0].scraped.listing_url, URL_, 'fell back to the page it was read from');
+    assert.equal(rows[0].scraped.listing_source, 'compass.com', 'so the source label still derives');
+  }
+});
 
-    assert.match(out, /^added /, `saved despite a ${url} canonical link`);
-    const saved = JSON.parse(fs.readFileSync(path.join(dir, 'data.js'), 'utf8').split('=')[1]);
-    assert.equal(saved[0].scraped.listing_url, URL_, 'fell back to the page it was read from');
-    assert.equal(saved[0].scraped.listing_source, 'compass.com', 'so the source label still derives');
+test('a photo directive pins the vetted address for curl', async () => {
+  const d = await photoDirective('https://example.com/hero.jpg', 'a-1-ca', new URL('https://x/y'));
+  assert.equal(d.url, 'https://example.com/hero.jpg');
+  assert.equal(d.path, 'photos/a-1-ca.jpg');
+  // host:port:ip — curl's --resolve triple. This is the whole reason the
+  // guard survives being moved to a curl on the operator's Mac: the address
+  // that was vetted is the address that gets connected to.
+  assert.match(d.resolve, /^example\.com:443:(\d+\.\d+\.\d+\.\d+|[0-9a-f:]+)$/);
+});
+
+test('a photo on a non-public address never becomes a directive', async () => {
+  // The agent runs whatever directive it is given, on a Mac that sits on the
+  // tailnet and the home LAN. Refusing here is refusing there.
+  for (const u of ['http://127.0.0.1/x.jpg', 'http://192.168.1.1/x.jpg', 'http://169.254.169.254/x.jpg']) {
+    await assert.rejects(
+      () => photoDirective(u, 'a-1-ca', new URL('https://x/y')),
+      /non-public|refusing/,
+      u,
+    );
   }
 });

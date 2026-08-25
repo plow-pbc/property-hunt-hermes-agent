@@ -97,3 +97,20 @@ test('no doc still tells the agent to escape a shell', () => {
     assert.doesNotMatch(text, /\\'\\\\'\\'/, `${doc} still carries the escape recipe`);
   }
 });
+
+test('no script reaches a filesystem', () => {
+  // The shape this repo now commits to: the Mac holds the data, this repo holds
+  // the logic, and nothing here bridges them. An fs call is exactly how a second
+  // copy of the state creeps back in — which is what drifted before.
+  const offenders: string[] = [];
+  for (const name of fs.readdirSync(SCRIPTS).filter((n) => n.endsWith('.ts') && !n.endsWith('.test.ts'))) {
+    fs.readFileSync(path.join(SCRIPTS, name), 'utf8')
+      .split('\n')
+      .forEach((line, i) => {
+        const t = line.trim();
+        if (t.startsWith('//') || t.startsWith('*') || t.startsWith('/*')) return;
+        if (/\bfs\.\w+|from 'node:fs'/.test(line)) offenders.push(`${name}:${i + 1} — ${t.slice(0, 60)}`);
+      });
+  }
+  assert.deepEqual(offenders, [], 'these still touch a filesystem');
+});
