@@ -286,10 +286,16 @@ export function coerceScraped(input: unknown): Scraped {
   if (normalizeWords(raw.address as string) === '') {
     throw new Error(`scraped.address has no usable characters: ${JSON.stringify(raw.address)}`);
   }
-  if (!storableUrl(raw.listing_url)) {
+  // Keep what the rule produced rather than re-deriving from the raw text.
+  // `new URL` trims surrounding space and accepts `https:x.com/y` without the
+  // slashes, so validating the parse and then persisting the original string
+  // stored a value the rule itself would not have written — and the map's href
+  // is that string.
+  const listing = storableUrl(raw.listing_url);
+  if (!listing) {
     throw new Error('scraped.listing_url is required and must be an http(s) URL');
   }
-  const listingUrl = raw.listing_url as string;
+  const listingUrl = listing.href;
 
   const asNumber = (key: string): number | null => {
     const value = raw[key];
@@ -329,7 +335,7 @@ export function coerceScraped(input: unknown): Scraped {
     listing_status: asText('listing_status'),
     listing_url: listingUrl,
     // Any host is supported; the source label just falls out of the URL.
-    listing_source: asText('listing_source') ?? new URL(listingUrl).hostname.replace(/^www\./, ''),
+    listing_source: asText('listing_source') ?? listing.hostname.replace(/^www\./, ''),
     photo,
     last_scraped_at: asText('last_scraped_at') ?? new Date().toISOString(),
   };

@@ -297,3 +297,18 @@ test('one rule decides what may be a listing url', () => {
     assert.equal(got?.href ?? null, expected, `${JSON.stringify(raw)} against ${base ?? 'no base'}`);
   }
 });
+
+test('a listing url is stored as the rule wrote it, not as the page spelled it', () => {
+  // `new URL` is lenient about surrounding space and about a special scheme
+  // missing its slashes. Both reach the map's href and the store's dedup
+  // display, so what is validated and what is kept have to be the same object.
+  for (const [given, stored] of [
+    ['  https://www.compass.com/p/1  ', 'https://www.compass.com/p/1'],
+    ['https:www.compass.com/p/1', 'https://www.compass.com/p/1'],
+    ['https://www.compass.com/p/1', 'https://www.compass.com/p/1'],
+  ]) {
+    const row = coerceScraped(scraped({ listing_url: given }));
+    assert.equal(row.listing_url, stored, given);
+    assert.equal(row.listing_source, 'compass.com', `source derives from the parsed host: ${given}`);
+  }
+});
