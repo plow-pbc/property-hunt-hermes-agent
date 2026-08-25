@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import {
@@ -246,7 +246,7 @@ test('whether a failure is worth retrying is decided by how the poll exited', ()
   // discriminator. Getting this backwards either spins on a page that will
   // never yield, or gives up on the exact case the old in-process loop rode
   // out and then succeeded on.
-  for (const { name, payload, retryable, says, omits } of [
+  for (const { name, payload, retryable, says } of [
     {
       name: 'json-ld up, og not, poll timed out — the shape the old loop retried',
       payload: { jsonld: [JSON.stringify(RESIDENCE)], og: {}, settled: false },
@@ -258,22 +258,6 @@ test('whether a failure is worth retrying is decided by how the poll exited', ()
       payload: { jsonld: [], og: {}, settled: false },
       retryable: true,
       says: /could not find an address/,
-    },
-    {
-      // Settled, and the failure is not a missing field at all: a listing that
-      // advertises an unparseable canonical URL raises "Invalid URL". Polling
-      // again returns the identical payload, so this must not read as
-      // retryable — and the try-another-site advice would be a non sequitur,
-      // since nothing about the page's *fields* is the problem.
-      name: 'settled, failing for a reason no missing-field pattern matches',
-      payload: {
-        jsonld: [JSON.stringify({ ...RESIDENCE, url: 'http://[[[bad' })],
-        og: FULL_OG,
-        settled: true,
-      },
-      retryable: false,
-      says: /Invalid URL/,
-      omits: /another listing site/,
     },
     {
       name: 'both surfaces settled and still no address',
@@ -293,10 +277,6 @@ test('whether a failure is worth retrying is decided by how the poll exited', ()
     assert.equal(result.type, 'tool_error', name);
     assert.equal(Boolean(result.retryable), retryable, name);
     assert.match(result.error, says, name);
-    // The wording half of the same decision: `settled` picks retryability, the
-    // error text picks whether the try-another-site sentence is appended. A
-    // regression that always appends it would pass a positive-match-only table.
-    if (omits) assert.doesNotMatch(result.error, omits, name);
     assert.equal(
       fs.readFileSync(path.join(dir, 'data.js'), 'utf8'),
       before,
@@ -380,4 +360,34 @@ test('the harvest expression actually runs, and reports which exit it took', asy
   const { page, settled } = parseHarvest(JSON.stringify(ready), URL_);
   assert.equal(settled, true);
   assert.deepEqual(page.jsonld, [{ '@type': 'House' }], 'the two halves agree on the wire format');
+});
+
+test('a photo that cannot be fetched costs the pin its picture, and says so', () => {
+  // The end of the chain the malformed-image fix opened up: extractScraped
+  // hands the bad URL on, downloadPhoto fails on it, and the listing is saved
+  // anyway with the user told why. Asserted here rather than at extract level
+  // because the contract that matters is "the house is on the map, without a
+  // photo" — not what one function returned.
+  const dir = initStore();
+  const run = spawnSync(
+    process.execPath,
+    [
+      fileURLToPath(new URL('./scrape.ts', import.meta.url)),
+      '--harvest',
+      JSON.stringify({
+        jsonld: [JSON.stringify(RESIDENCE)],
+        og: { ...FULL_OG, 'og:image': 'http://[[[bad' },
+        settled: true,
+      }),
+      URL_,
+    ],
+    { env: { ...process.env, PROPERTY_HUNT_DIR: dir }, encoding: 'utf8' },
+  );
+
+  assert.match(run.stdout, /^added /, 'the listing is saved');
+  assert.match(run.stderr, /photo download failed .* the pin will use a plain marker/);
+  const saved = JSON.parse(fs.readFileSync(path.join(dir, 'data.js'), 'utf8').split('=')[1]);
+  assert.equal(saved.length, 1);
+  assert.equal(saved[0].scraped.photo, null, 'an honest empty photo, not a broken path');
+  assert.equal(saved[0].scraped.address, '424 28th St');
 });

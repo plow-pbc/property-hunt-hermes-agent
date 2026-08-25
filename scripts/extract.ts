@@ -202,11 +202,26 @@ export function extractScraped(page: PageSurfaces, now: string = new Date().toIS
   const floorPlan = listing ? (firstDeep(listing, 'accommodationFloorPlan') as Record<string, unknown> | undefined) : undefined;
   const floorSize = listing ? firstDeep(listing, 'floorSize') : undefined;
 
-  // og:url and JSON-LD url are sometimes site-relative; resolve against the page.
-  const listingUrl = new URL(
-    (typeof listing?.url === 'string' ? listing.url : undefined) ?? og['og:url'] ?? page.url,
+  // og:url and JSON-LD url are sometimes site-relative; resolve against the
+  // page. Both are site-controlled text, so take the first candidate that
+  // PARSES rather than throwing on the first that does not — a page
+  // advertising a broken canonical URL should cost the record its link, not
+  // its existence. page.url is last and main() has already validated it as
+  // http(s), so this always lands.
+  let listingUrl = page.url;
+  for (const candidate of [
+    typeof listing?.url === 'string' ? listing.url : undefined,
+    og['og:url'],
     page.url,
-  ).href;
+  ]) {
+    if (!candidate) continue;
+    try {
+      listingUrl = new URL(candidate, page.url).href;
+      break;
+    } catch {
+      // Next candidate.
+    }
+  }
 
   const image = listing ? firstDeep(listing, 'image') : undefined;
   const imageUrl =
@@ -214,21 +229,6 @@ export function extractScraped(page: PageSurfaces, now: string = new Date().toIS
     (typeof image === 'string' ? image : undefined) ??
     og['og:image'];
 
-  // The photo is decorative and every other way it can fail is survivable: a
-  // download error is downgraded to a plain marker, and keepPreviousEnrichment
-  // is built on a missing photo being fine. Parsing was the one place a bad
-  // image discarded the whole listing — and the URL is site-controlled text,
-  // so one bad value meant a property could never be added from that site.
-  // The listing URL below stays strict on purpose: it is the dedup key and the
-  // thing the user clicks, not decoration.
-  let photoUrl: string | null = null;
-  if (imageUrl) {
-    try {
-      photoUrl = new URL(imageUrl, page.url).href;
-    } catch {
-      photoUrl = null;
-    }
-  }
 
   const propertyType =
     listing ? typesOf(listing).find((t) => t !== 'Product' && t !== 'RealEstateListing') ?? null : null;
@@ -252,6 +252,10 @@ export function extractScraped(page: PageSurfaces, now: string = new Date().toIS
       photo: null,
       last_scraped_at: now,
     },
-    photoUrl,
+    // Unresolved on purpose. downloadPhoto resolves it against the page, and
+    // its failure is already reported as "the pin will use a plain marker" —
+    // so resolving here too would be a second place parsing the same URL, and
+    // a silent one.
+    photoUrl: imageUrl ?? null,
   };
 }

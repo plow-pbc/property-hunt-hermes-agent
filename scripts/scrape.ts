@@ -113,17 +113,16 @@ export function parseHarvest(raw: string, url: string): { page: PageSurfaces; se
  */
 function reportHarvestFailure(url: string, settled: boolean, problem: string): void {
   if (settled) {
-    // `settled` alone decides this. Gating on the error text as well sent a
-    // settled page that failed for any OTHER reason back for two more evals of
-    // a byte-identical payload — a malformed og:image raises "Invalid URL",
-    // which no missing-field pattern matches. The text only picks the wording.
-    const missingField = /is required|could not find an address|no usable characters/.test(problem);
+    // No test of the error text. extractScraped now throws only for the
+    // identity fields — address, city, state, zip — because the two
+    // site-controlled URLs it used to throw on both degrade instead: a bad
+    // image loses the pin its photo, a bad canonical URL falls back to the
+    // page. So every way of reaching this branch IS a missing field, and the
+    // conjunction that used to guard this sentence had no remaining case.
     toolError(
-      `read ${url}, but it does not publish a saveable listing. Last problem: ${problem}.` +
-        (missingField
-          ? ' If the page genuinely does not publish that field, try this property on another' +
-            ' listing site — do not supply a value of your own.'
-          : ''),
+      `read ${url}, but it does not publish a saveable listing. Last problem: ${problem}. ` +
+        'If the page genuinely does not publish that field, try this property on another ' +
+        'listing site — do not supply a value of your own.',
     );
     return;
   }
@@ -300,11 +299,11 @@ function getPinned(
   });
 }
 
-async function downloadPhoto(photoUrl: string, dir: string, id: string): Promise<string> {
+async function downloadPhoto(photoUrl: string, dir: string, id: string, base: URL): Promise<string> {
   // Every hop is resolved and vetted, then connected to by address — a public
   // URL that 302s inward, or a name that rebinds between check and connect,
   // both fail here rather than reaching the network behind us.
-  let hop = await resolvePublicDestination(photoUrl);
+  let hop = await resolvePublicDestination(photoUrl, base);
   let response = await getPinned(hop.url, hop.address, hop.family);
 
   for (let redirects = 0; response.status >= 300 && response.status < 400; redirects += 1) {
@@ -412,7 +411,7 @@ async function main(): Promise<void> {
 
   if (photoUrl) {
     try {
-      scraped.photo = await downloadPhoto(photoUrl, dir, id);
+      scraped.photo = await downloadPhoto(photoUrl, dir, id, new URL(url));
     } catch (err) {
       note(`photo download failed (${(err as Error).message}) — the pin will use a plain marker`);
     }

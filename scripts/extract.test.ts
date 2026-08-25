@@ -193,26 +193,28 @@ const MINIMAL: PageSurfaces = {
   og: { 'og:title': '424 28th St, San Francisco, CA 94131' },
 };
 
-test('a hero image we cannot parse costs the pin its photo, not the listing', () => {
-  // The image URL is site-controlled text. Every other way the photo can fail
-  // is already survivable — a failed download becomes a plain marker — but
-  // parsing threw, so one bad og:image meant the property could never be added
-  // from that site at all.
+test('a hero image we cannot parse is handed on, not resolved here', () => {
+  // downloadPhoto resolves it against the page inside the try whose catch
+  // already writes "the pin will use a plain marker". Parsing it here too
+  // would be a second place doing that job, and a silent one — the listing
+  // would lose its photo with nothing said.
   const { scraped, photoUrl } = extractScraped({
     ...MINIMAL,
     og: { ...MINIMAL.og, 'og:image': 'http://[[[bad' },
   });
 
-  assert.equal(photoUrl, null, 'no photo to download');
-  assert.equal(scraped.address, '424 28th St', 'and the listing is saved anyway');
-  assert.equal(scraped.price, 3250000, 'with everything the page did publish');
+  assert.equal(photoUrl, 'http://[[[bad', 'handed on unresolved');
+  assert.equal(scraped.address, '424 28th St', 'and the listing parses regardless');
+  assert.equal(scraped.price, 3250000);
 });
 
-test('a listing whose own url will not parse is refused', () => {
-  // The counterpart to the leniency above, and the reason it is not applied
-  // here: listing_url is the dedup key and the link the user clicks.
-  assert.throws(
-    () => extractScraped({ ...MINIMAL, og: { ...MINIMAL.og, 'og:url': 'http://[[[bad' } }),
-    /Invalid URL/,
-  );
+test('a listing whose own url will not parse falls back to the page it was read from', () => {
+  // Both candidates ahead of it are site-controlled text, and page.url has
+  // already been validated as http(s) by the caller. Throwing here discarded a
+  // listing whose address, price and beds had all parsed, with a known-good
+  // fallback sitting one line away.
+  const { scraped } = extractScraped({ ...MINIMAL, og: { ...MINIMAL.og, 'og:url': 'http://[[[bad' } });
+
+  assert.equal(scraped.listing_url, MINIMAL.url);
+  assert.equal(scraped.listing_source, 'compass.com', 'and the source label still derives');
 });
