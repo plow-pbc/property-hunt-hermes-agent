@@ -16,7 +16,7 @@ import { pathToFileURL } from 'node:url';
 
 import { extractScraped, geocodeQuery } from './extract.ts';
 import type { PageSurfaces } from './extract.ts';
-import { coerceScraped, readStore, slugify, upsertScraped, writeStore } from './store.ts';
+import { coerceScraped, readStore, slugify, storableUrl, upsertScraped, writeStore } from './store.ts';
 import type { Scraped } from './store.ts';
 import { resolveDataDir } from './properties.ts';
 
@@ -359,8 +359,8 @@ export function keepPreviousEnrichment(
 }
 
 async function main(): Promise<void> {
-  const url = process.argv[2] === '--harvest' ? process.argv[4] : undefined;
-  if (!url || !/^https?:\/\//i.test(url)) {
+  const url = process.argv[2] === '--harvest' ? (process.argv[4] ?? '') : '';
+  if (!storableUrl(url)) {
     toolError("usage: node scrape.ts --harvest '<eval-result-json>' '<listing-url>'");
     return;
   }

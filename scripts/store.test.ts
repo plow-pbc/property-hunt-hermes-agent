@@ -15,6 +15,7 @@ import {
   emptyStoreText,
   coerceScraped,
   removeProperty,
+  storableUrl,
 } from './store.ts';
 import type { Scraped } from './store.ts';
 
@@ -270,4 +271,29 @@ test('a write leaves no scratch files behind', () => {
   const dir = tmpdir();
   writeStore(dir, upsertScraped([], scraped()));
   assert.deepEqual(fs.readdirSync(dir), ['data.js'], 'the tmp file must be renamed, not left alongside');
+});
+
+test('one rule decides what may be a listing url', () => {
+  // Three files used to spell this independently. It lives here now because
+  // the store is what rejects a bad one, and the bug it prevents is another
+  // caller accepting something this would refuse.
+  for (const [raw, base, expected] of [
+    ['https://www.compass.com/p/1', undefined, 'https://www.compass.com/p/1'],
+    ['http://example.com/x', undefined, 'http://example.com/x'],
+    // Parse fine, and are not somewhere the map can send anyone.
+    ['mailto:agent@example.com', undefined, null],
+    ['javascript:void(0)', undefined, null],
+    ['data:text/html,x', undefined, null],
+    ['ftp://files.example.com/x', undefined, null],
+    // Only resolvable against the page, which is why the rule cannot be a
+    // text test on the raw string.
+    ['/p/2', 'https://www.compass.com/p/1', 'https://www.compass.com/p/2'],
+    ['http://[[[bad', undefined, null],
+    ['', undefined, null],
+    [undefined, undefined, null],
+    [42, undefined, null],
+  ] as Array<[unknown, string | undefined, string | null]>) {
+    const got = storableUrl(raw, base);
+    assert.equal(got?.href ?? null, expected, `${JSON.stringify(raw)} against ${base ?? 'no base'}`);
+  }
 });

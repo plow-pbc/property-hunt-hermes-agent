@@ -6,7 +6,7 @@
 // meta. No DOM selectors anywhere, which is what keeps it working across a
 // cosmetic redesign — and what lets it generalize past Compass, since
 // listing_url accepts any host.
-import { UNIT_DESIGNATOR } from './store.ts';
+import { storableUrl, UNIT_DESIGNATOR } from './store.ts';
 import type { Scraped } from './store.ts';
 
 export type PageSurfaces = {
@@ -214,19 +214,13 @@ export function extractScraped(page: PageSurfaces, now: string = new Date().toIS
     og['og:url'],
     page.url,
   ]) {
-    if (!candidate) continue;
-    try {
-      const resolved = new URL(candidate, page.url);
-      // Parsing is not the bar — the store's is. `mailto:` and
-      // `javascript:void(0)` parse perfectly well, so accepting the first
-      // thing that PARSED took a page's own bad link and then failed the
-      // record on it downstream, with page.url one candidate away unused.
-      if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:') continue;
-      listingUrl = resolved.href;
-      break;
-    } catch {
-      // Next candidate.
-    }
+    // Parsing is not the bar; the store's is, and storableUrl is where it
+    // lives. Accepting anything that merely PARSED took a page's own
+    // `mailto:` link and then failed the record on it downstream.
+    const resolved = storableUrl(candidate, page.url);
+    if (!resolved) continue;
+    listingUrl = resolved.href;
+    break;
   }
 
   const image = listing ? firstDeep(listing, 'image') : undefined;
