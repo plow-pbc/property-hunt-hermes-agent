@@ -335,7 +335,10 @@ export function coerceScraped(input: unknown): Scraped {
     listing_status: asText('listing_status'),
     listing_url: listingUrl,
     // Any host is supported; the source label just falls out of the URL.
-    listing_source: asText('listing_source') ?? listing.hostname.replace(/^www\./, ''),
+    // Derived, never accepted. A caller-supplied label was the last way a
+    // stored label could disagree with the URL beside it, and after extract
+    // stopped sending one nothing in production reached that branch anyway.
+    listing_source: listing.hostname.replace(/^www\./, ''),
     photo,
     last_scraped_at: asText('last_scraped_at') ?? new Date().toISOString(),
   };

@@ -34,7 +34,6 @@ function scraped(over: Partial<Scraped> = {}): Scraped {
     property_type: 'SingleFamilyResidence',
     listing_status: 'active',
     listing_url: 'https://www.compass.com/homedetails/424-28th-St-San-Francisco-CA-94131/1QUY9H_pid/',
-    listing_source: 'compass.com',
     photo: null,
     last_scraped_at: '2026-08-14T19:00:00.000Z',
     ...over,
