@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Keeps the map's file server running across logout and reboot.
+
+  `tailscale serve`'s own config persists on its own; this is only the port it
+  proxies. Without it the proxy survives a restart pointing at nothing, and the
+  map goes quietly blank while everything looks configured.
+
+  Loopback only, deliberately: Tailscale is the sole route in and it is
+  tailnet-scoped. A 0.0.0.0 bind would publish the map, and its addresses, to
+  the whole LAN.
+
+  @PORT@ and @DIR@ are substituted by `just serve-install`.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>co.plow.property-map</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python3</string>
+    <string>-m</string><string>http.server</string><string>@PORT@</string>
+    <string>--bind</string><string>127.0.0.1</string>
+    <string>--directory</string><string>@DIR@</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/tmp/property-map.log</string>
+  <key>StandardErrorPath</key><string>/tmp/property-map.log</string>
+</dict>
+</plist>

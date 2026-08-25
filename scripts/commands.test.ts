@@ -114,3 +114,26 @@ test('no script reaches a filesystem', () => {
   }
   assert.deepEqual(offenders, [], 'these still touch a filesystem');
 });
+
+test('the serve recipes bind the file server to loopback only', () => {
+  // Tailscale is the only way in, and it is tailnet-scoped. A 0.0.0.0 bind
+  // would put the map — and the addresses of houses someone is considering —
+  // on the whole LAN.
+  const just = fs.readFileSync(path.join(BUNDLE, 'justfile'), 'utf8');
+  assert.match(just, /--bind 127\.0\.0\.1/);
+  assert.doesNotMatch(just, /--bind 0\.0\.0\.0/);
+
+  // Read the argument that follows --bind, not any occurrence of an address:
+  // the comments in both files explain why NOT to bind 0.0.0.0, and a plain
+  // scan flags the explanation. Same trap the Bearer scan fell into.
+  const plist = fs.readFileSync(path.join(BUNDLE, 'references', 'launchd', 'co.plow.property-map.plist'), 'utf8');
+  const args = [...plist.matchAll(/<string>([^<]*)<\/string>/g)].map((m) => m[1]);
+  const bindAt = args.indexOf('--bind');
+  assert.notEqual(bindAt, -1, 'the plist must bind explicitly rather than default');
+  assert.equal(args[bindAt + 1], '127.0.0.1');
+
+  // Path serving is refused by the sandboxed macOS build, so the recipe must
+  // proxy a port. Getting this wrong fails at the operator, not in CI.
+  assert.match(just, /serve --bg/);
+  assert.doesNotMatch(just, /serve --bg [^\n]*Plow\/properties/);
+});

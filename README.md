@@ -33,9 +33,14 @@ leave your Mac.
 ## Requirements
 
 A Mac running [Plow Latch](https://github.com/plow-pbc/latch), and a Hermes
-agent you can text. Latch is how the agent reaches the Mac: listing sites refuse
-plain HTTP requests, so the lookup runs through the supervised browser there,
-and the scripts run beside the map they write.
+agent you can text.
+
+**The Mac holds only Latch and your data.** These scripts run in the agent's
+container, from a pinned checkout, and never touch a filesystem: the store goes
+in as an argument and the new one comes out on stdout. The agent reads
+`data.js` off the Mac through Latch, runs the transform, and writes the result
+back. Nothing here is installed on the Mac, so nothing here can fall out of
+step with the agent.
 
 [howto.plow.co/property-hunt](https://howto.plow.co/property-hunt) is the
 install guide.
@@ -53,18 +58,23 @@ index.html   the map
 It's yours. Upgrading or removing the skill never touches it. `data.js` is plain
 JSON, so you can read it, diff it, or keep it in git.
 
+## Viewing the map on a phone
+
+`just serve` on the Mac puts the map on your tailnet over HTTPS, and
+`just serve-install` keeps it there across reboots. The file server binds to
+loopback only — Tailscale is the sole route in, and it is tailnet-scoped, so
+the map is never on the public internet.
+
 ## Development
 
-No dependencies and no build — Node 24 runs the TypeScript directly. From a repo
-checkout:
+No dependencies and no build — Node 24 runs the TypeScript directly:
 
 ```sh
 just test
 ```
 
-Install it by cloning this repo to `~/Plow/skills/property-hunt` on the Mac; the
-guide above has the step. There is no installer binary — the agent runs the
-scripts from wherever the checkout sits.
+Every script is a pure transform, so the tests need no filesystem and no
+fixtures on disk. A contract test fails the suite if one grows an `fs` call.
 
 ## License
 

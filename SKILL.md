@@ -7,80 +7,89 @@ description: Track houses for sale on a private map. Use when the user texts a p
 
 The user is house hunting. They text you photos of listings; you identify each
 one, look up what the photo doesn't show, and keep a private map they can open
-from their Mac.
+from their Mac or their phone.
+
+## How this works, and why it matters
+
+**You hold the logic. The Mac holds the data.** The scripts run here, in your
+container, from a pinned checkout. `~/Plow/properties/` on the Mac holds
+`data.js`, the map, and the photos — and nothing else. There is no copy of
+these scripts on the Mac to fall out of step with you.
+
+So every change to the store is three moves:
+
+1. **Read** `~/Plow/properties/data.js` with `plow_read_file`
+2. **Transform** it by running a script here, passing the contents as `--store`
+3. **Write** the result back with `plow_write_file`
+
+The scripts never touch a filesystem. They take the store as an argument and
+print a JSON envelope saying what should replace it:
+
+```json
+{ "store": "…", "fetch": {…}, "remove": ["…"], "id": "…", "verb": "added", "notes": ["…"] }
+```
+
+`store` is the exact text to write back. `fetch` and `remove` appear only when
+there is something to do on the Mac. **A key that is absent means nothing to
+do** — do not invent an empty one.
 
 ## Requirements
 
-This skill works through **Plow Latch**, which is how you reach the user's Mac.
-It needs three of Latch's tools:
-
-- `plow_browser_open` and `plow_browser` — listing sites refuse plain HTTP
-  requests, so the lookup runs through the supervised browser on the Mac.
-- `plow_run_command` — runs the scripts that own the store, on the Mac, beside
-  the map they write.
-
-Everything is written to `~/Plow/properties/` on the Mac, so the user can open
-the map in Finder.
-
-## Paths, before anything else
+Plow Latch, which is how you reach the Mac. You need `plow_browser_open`,
+`plow_browser`, `plow_read_file`, `plow_write_file` and `plow_run_command`.
 
 `plow_run_command` takes an **argv array and runs it directly — there is no
-shell**. Two consequences, and both bite silently:
+shell**. `~` is never expanded, so use the real absolute path. Values are
+separate array elements; never build one string out of them.
 
-- `~` is never expanded. Use the real absolute path, like
-  `/Users/sam/Plow/skills/property-hunt/scripts`.
-- Values are separate array elements. Never build one string out of them.
+## First time only
 
-Every call below sets `cwd` to that scripts folder. Run this once at the start
-of a session to confirm where the store lives:
-
-```json
-{
-  "command": ["node", "./properties.ts", "where"],
-  "cwd": "/Users/<user>/Plow/skills/property-hunt/scripts"
-}
-```
-
-## First, always
+Create the folder and put the map there. `index.html` and the Leaflet files are
+text, so you write them yourself — read each from your own checkout and write
+it across.
 
 ```json
 {
-  "command": ["node", "./properties.ts", "init"],
-  "cwd": "/Users/<user>/Plow/skills/property-hunt/scripts",
-  "writes": ["/Users/<user>/Plow/properties"]
+  "command": ["mkdir", "-p", "/Users/<user>/Plow/properties/photos", "/Users/<user>/Plow/properties/vendor"]
 }
 ```
 
-Idempotent and safe to re-run. It creates the folder, the map page, and an empty
-store, and never touches properties already saved.
+Then `plow_write_file` each of these, from `references/frontend/` in your
+checkout to `~/Plow/properties/`:
+
+| from | to |
+|---|---|
+| `references/frontend/index.html` | `~/Plow/properties/index.html` |
+| `references/frontend/vendor/leaflet.js` | `~/Plow/properties/vendor/leaflet.js` |
+| `references/frontend/vendor/leaflet.css` | `~/Plow/properties/vendor/leaflet.css` |
+
+The marker PNGs in `references/frontend/vendor/images/` are **not** copied. The
+map draws its own pins from the property photos, so Leaflet never asks for
+them.
+
+Finally write an empty store, once:
+
+```json
+{ "path": "/Users/<user>/Plow/properties/data.js", "content": "window.PROPERTIES =\n[]\n" }
+```
 
 ## Adding a property
 
 A texted photo arrives as a file path. **Read the image** — you need the
 address.
 
-**1. Get the listing URL.**
+**1. Get the listing URL.** If the user pasted one, or one is legible in the
+screenshot, use it. Otherwise search for the address on Compass — that is the
+default source. Any listing site works; prefer Compass only when *you* are
+choosing.
 
-- If the user pasted one, or one is legible in the screenshot, use it.
-- Otherwise search for the address on Compass — that is the default source.
-  Listing pages look like
-  `https://www.compass.com/homedetails/<Address-Slug>/<ID>_pid/`.
-- Any listing site works (Zillow, Redfin, an MLS page). Prefer Compass only
-  when *you* are the one choosing.
-
-**2. Open a browser session for that site.** Include the apex and the wildcard;
-the owner approves this list, so asking for both once avoids a second prompt
-mid-hunt.
+**2. Open a browser session for that site.** Include the apex and the wildcard.
+The owner approves this list, so asking for both at once avoids a second prompt
+mid-conversation.
 
 ```json
-{
-  "tool": "plow_browser_open",
-  "origins": ["compass.com", "*.compass.com"],
-  "goal": "Read a property listing the user is considering"
-}
+{ "tool": "plow_browser_open", "origins": ["compass.com", "*.compass.com"], "goal": "Read a property listing the user is considering" }
 ```
-
-Keep the returned `session` and pass it on every call below.
 
 **3. Load the page.**
 
@@ -88,52 +97,66 @@ Keep the returned `session` and pass it on every call below.
 { "tool": "plow_browser", "session": "<session>", "action": "goto", "url": "<listing-url>" }
 ```
 
-**4. Read the listing.** Use this expression exactly as written. It polls
-inside the page, because `goto` returns while a listing is still an empty shell
-and reading that shell looks the same as being blocked:
+**4. Read the listing.** Use this expression exactly as written. It polls inside
+the page, because `goto` returns while a listing is still an empty shell and
+reading that shell looks the same as being blocked:
 
 ```js
 (async () => { const read = () => ({ jsonld: [...document.querySelectorAll('script[type="application/ld+json"]')].map(s => s.textContent), og: Object.fromEntries([...document.querySelectorAll('meta[property^="og:"], meta[name^="twitter:"]')].map(m => [m.getAttribute('property') || m.getAttribute('name'), m.content || ''])) }); const deadline = Date.now() + 10000; let seen = read(); while (Date.now() < deadline) { if (seen.jsonld.length && Object.keys(seen.og).length) return { ...seen, settled: true }; await new Promise(r => setTimeout(r, 750)); seen = read(); } return { ...seen, settled: false }; })()
 ```
 
-Pass it as the `expression` field:
+Pass it as the `expression` field of a `plow_browser` `eval`. It returns
+`{ jsonld, og, settled }` — hand the whole thing to the next step unedited.
+
+**5. Read the current store.**
 
 ```json
-{
-  "tool": "plow_browser",
-  "session": "<session>",
-  "action": "eval",
-  "expression": "<the expression above>"
-}
+{ "tool": "plow_read_file", "path": "/Users/<user>/Plow/properties/data.js" }
 ```
 
-It returns `{ jsonld, og, settled }`. Hand the whole thing to the next step
-without editing it — `settled` is what tells the saver whether a page that came
-back thin is worth reading again.
+**6. Transform it — here, in your own container.**
 
-**5. Save what it returned.** Hand the eval result through unchanged, as one
-argv element:
+```sh
+node scripts/scrape.ts --harvest '<the eval result>' '<listing-url>' --store '<the data.js contents>'
+```
+
+Add `--photo-on-disk` when you are refreshing a property whose photo file is
+already on the Mac. Leaving it off costs a re-fetch; claiming it wrongly leaves
+a pin pointing at nothing.
+
+**7. Write the store back.**
+
+```json
+{ "tool": "plow_write_file", "path": "/Users/<user>/Plow/properties/data.js", "content": "<the envelope's store value>" }
+```
+
+**8. Fetch the photo, if the envelope carried a `fetch`.**
 
 ```json
 {
-  "command": ["node", "./scrape.ts", "--harvest", "<the eval result>", "<listing-url>"],
-  "cwd": "/Users/<user>/Plow/skills/property-hunt/scripts",
+  "command": ["curl", "--resolve", "<fetch.resolve>", "--max-redirs", "0", "-fsSL", "-o", "<fetch.path>", "<fetch.url>"],
+  "cwd": "/Users/<user>/Plow/properties",
   "network": true,
-  "writes": ["/Users/<user>/Plow/properties"]
+  "writes": ["/Users/<user>/Plow/properties/photos"]
 }
 ```
 
-`network` is required: this geocodes the address and downloads the hero photo.
-It prints `added <id>` or `refreshed <id>`.
+**Both flags are required, and neither is stylistic.** The photo URL comes from
+the listing page, so it is not the user's text and not yours. `--resolve` pins
+the address that was already vetted, so DNS cannot swing to a private one
+between the check and the fetch. `--max-redirs 0` refuses hops nobody vetted —
+the transform already followed them and gave you the final URL. Dropping either
+turns the map into a probe of the user's own network.
 
-**6. Tell the user what you saved** — one line: address, price, beds/baths/sqft.
+**9. Tell the user what you saved** — one line: address, price, beds/baths/sqft.
 
 ### When it fails
 
-A failure prints `{"type":"tool_error","error":"..."}` and saves nothing.
+A failure prints `{"type":"tool_error","error":"..."}` and no `store`, so there
+is nothing to write back.
 
 **If the error carries `"retryable": true`**, the page had not finished
-rendering. Repeat steps 4 and 5 — up to three attempts total. Do not reload the
+rendering. Repeat steps 4 through 6 — up to three attempts. Do not reload the
 page and do not open a second session; the expression polls on its own, so each
 attempt gives the page another ten seconds.
 
@@ -143,65 +166,81 @@ site. Never supply a value you could not measure.
 
 ## Editing
 
-Everything the user says about a property maps onto the same few commands. Read
-the store, work out which house they mean, then act. Each of these takes the
-same `cwd` as above.
+Read the store, transform, write it back — the same three moves.
+
+```sh
+node scripts/properties.ts list --store '<contents>'
+node scripts/properties.ts list --json --store '<contents>'
+node scripts/properties.ts get <id> --store '<contents>'
+node scripts/properties.ts set <id> rating 4 --store '<contents>'
+node scripts/properties.ts set <id> status toured --store '<contents>'
+node scripts/properties.ts set <id> notes needs a new roof --store '<contents>'
+node scripts/properties.ts rm <id> --store '<contents>'
+```
+
+`list` and `get` only read, so there is nothing to write back. `set` and `rm`
+print an envelope; write its `store`.
+
+`rm` also carries `remove` with the photo to delete. It does not delete
+anything itself:
 
 ```json
-{ "command": ["node", "./properties.ts", "list"] }
-{ "command": ["node", "./properties.ts", "list", "--json"] }
-{ "command": ["node", "./properties.ts", "set", "<id>", "rating", "4"] }
-{ "command": ["node", "./properties.ts", "set", "<id>", "status", "toured"] }
-{ "command": ["node", "./properties.ts", "set", "<id>", "notes", "needs a new roof, great light"] }
-{ "command": ["node", "./properties.ts", "rm", "<id>"] }
+{ "command": ["rm", "-f", "<each entry in remove>"], "cwd": "/Users/<user>/Plow/properties" }
 ```
 
 `status` is free text; `new`, `interested`, `toured`, and `passed` are the ones
 the map colours. `rating` is 1–5.
 
-The user's words go in as their own array element, exactly as they said them.
-An apostrophe needs nothing done to it — *needs a roof, don't love the kitchen*
-is one element and arrives intact.
+The user's words go in as their own array elements, exactly as they said them.
+An apostrophe needs nothing done to it.
 
 Match loosely and confirm: *"the one on Elm"* means read `list --json` and find
 it. If two could match, ask which.
 
 **To refresh a listing** (price cut, went pending), add it again with the same
-four steps. It updates in place and **never touches the user's rating, notes,
-or status.**
+steps. It updates in place and **never touches the user's rating, notes, or
+status.**
 
 ## Answering questions
 
 Read `list --json` and answer from it. There is no query language and you do not
-need one — a house hunt is a few dozen properties. *"Which ones under $2M have I
-rated 4 or better?"* is you reading the JSON, not a command.
+need one — a house hunt is a few dozen properties.
 
 ## The map
 
-`~/Plow/properties/index.html` on the Mac. The user opens it from Finder — no
-server. Each pin is the house's photo with its price and bed count, ringed by
-status; clicking one opens the listing. Tell them where it is the first time
-they add a property.
+`~/Plow/properties/index.html`. The user opens it from Finder. Each pin is the
+house's photo with its price and bed count, ringed by status; clicking one opens
+the listing.
+
+To reach it from a phone, serve it to the tailnet:
+
+```json
+{ "command": ["just", "serve"], "cwd": "/Users/<user>/Plow/skills/property-hunt", "network": true }
+```
+
+and `just serve-install` to keep it served across reboots. Both run on the Mac
+and print the URL. The file server binds to loopback only; Tailscale is the sole
+route in, and it is tailnet-scoped.
 
 ## Rules
 
-- **Only ever change the store through `scrape.ts` or `properties.ts`** —
-  `scrape.ts` adds and refreshes, `properties.ts` edits what you own and
-  deletes. **Never edit `data.js` by hand.** Both write atomically, and the map
-  may be open at the time.
+- **The scripts are the only thing that shapes the store.** Never write
+  `data.js` from your own reasoning — run the transform and write what it
+  printed. It enforces the dedup key, the field rules, and the separation
+  below; you would be guessing at all three.
 - **`scraped` is the listing's; `mine` is the user's.** You cannot `set` a
   scraped field — those only come from a scrape, so their timestamp stays
   honest.
 - **Never invent a value.** If the scrape did not find the price, it is `null`.
   Say you could not find it.
+- **Always pass `--store`.** Every command refuses without it rather than
+  assuming an empty store, because assuming would discard every property on the
+  write that follows.
 - A property with no coordinates still gets saved; the map lists it under
   *"not on the map"* rather than dropping it.
 
 ## Checking your own work
 
-```json
-{
-  "command": ["node", "--test", "commands.test.ts", "extract.test.ts", "properties.test.ts", "scrape.test.ts", "store.test.ts"],
-  "cwd": "/Users/<user>/Plow/skills/property-hunt/scripts"
-}
+```sh
+node --test scripts/commands.test.ts scripts/extract.test.ts scripts/properties.test.ts scripts/scrape.test.ts scripts/store.test.ts
 ```
