@@ -214,6 +214,9 @@ test('a listing from any site is accepted and labeled by its host', () => {
     ['https://www.compass.com/homedetails/x/1_pid/', 'compass.com'],
     ['https://www.zillow.com/homedetails/x/1_zpid/', 'zillow.com'],
     ['https://redfin.com/CA/SF/x', 'redfin.com'],
+    // Lenient spellings reach the label through the same parsed object.
+    ['https:www.compass.com/p/1', 'compass.com'],
+    ['  https://www.zillow.com/p/1  ', 'zillow.com'],
   ] as const) {
     assert.equal(coerceScraped({ ...VALID, listing_url: url }).listing_source, expected);
   }
@@ -307,7 +310,7 @@ test('a listing url is stored as the rule wrote it, not as the page spelled it',
     ['https:www.compass.com/p/1', 'https://www.compass.com/p/1'],
     ['https://www.compass.com/p/1', 'https://www.compass.com/p/1'],
   ]) {
-    const row = coerceScraped(scraped({ listing_url: given }));
+    const row = coerceScraped({ ...VALID, listing_url: given });
     assert.equal(row.listing_url, stored, given);
     assert.equal(row.listing_source, 'compass.com', `source derives from the parsed host: ${given}`);
   }

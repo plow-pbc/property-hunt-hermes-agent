@@ -154,7 +154,12 @@ function statusFrom(availability: unknown): string | null {
  * filled after the image is downloaded. The remote URL comes back alongside it
  * rather than being crammed into the same field.
  */
-export type Extracted = { scraped: Scraped; photoUrl: string | null };
+/**
+ * `listing_source` is absent on purpose: coerceScraped derives it from the same
+ * parsed URL it validates, so the label has one owner. Deriving it here as well
+ * meant the copy the app displayed was not the copy the store's tests covered.
+ */
+export type Extracted = { scraped: Omit<Scraped, 'listing_source'>; photoUrl: string | null };
 
 /**
  * Build a record from a page's structured surfaces.
@@ -248,7 +253,6 @@ export function extractScraped(page: PageSurfaces, now: string = new Date().toIS
       property_type: propertyType,
       listing_status: statusFrom(offers?.availability),
       listing_url: listingUrl,
-      listing_source: new URL(listingUrl).hostname.replace(/^www\./, ''),
       photo: null,
       last_scraped_at: now,
     },

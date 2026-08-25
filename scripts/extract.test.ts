@@ -33,7 +33,6 @@ test('a real Compass listing parses into the record the map needs', () => {
   assert.equal(scraped.sqft, 2315, 'floorSize arrives as the string "2,315 "');
   assert.equal(scraped.property_type, 'SingleFamilyResidence');
   assert.equal(scraped.listing_status, 'active', 'schema.org InStock is not a phrase to show a user');
-  assert.equal(scraped.listing_source, 'compass.com');
   assert.match(scraped.listing_url, /424-28th-St-San-Francisco-CA-94131/);
   assert.ok(photoUrl && photoUrl.startsWith('https://'), 'a hero image is needed for the pin');
   assert.equal(scraped.lat, null, 'coordinates are not on this page — scrape.ts geocodes them');
@@ -169,7 +168,6 @@ test('a non-Compass listing parses from open-graph alone', () => {
   assert.equal(scraped.price, 985000);
   assert.equal(scraped.beds, 2);
   assert.equal(scraped.sqft, 1100);
-  assert.equal(scraped.listing_source, 'zillow.com');
 });
 
 // A page carrying only what these two tests are about. COMPASS cannot be used:
@@ -216,5 +214,4 @@ test('a listing whose own url will not parse falls back to the page it was read 
   const { scraped } = extractScraped({ ...MINIMAL, og: { ...MINIMAL.og, 'og:url': 'http://[[[bad' } });
 
   assert.equal(scraped.listing_url, MINIMAL.url);
-  assert.equal(scraped.listing_source, 'compass.com', 'and the source label still derives');
 });
