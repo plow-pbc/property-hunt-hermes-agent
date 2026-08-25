@@ -168,21 +168,23 @@ function skillCommands(): string[] {
   return out;
 }
 
-test('the map is served as a port, never as a directory', () => {
-  // `tailscale serve <path>` is refused outright by the Mac build. Getting it
-  // wrong is a hard error at the operator rather than a red test, so it is
-  // pinned — and pinned as an ALLOW-list, after three rounds of a deny-list
-  // missing a form: first `serve --bg <dir>`, then a second serve invocation,
-  // then a bare relative directory. What may follow `serve` is a flag or the
-  // port. Anything else is a path, whatever it looks like.
-  const serves = skillCommands().filter((c) => c.includes('"serve"'));
-  assert.ok(serves.length, 'SKILL.md must show the tailnet publish');
+test('the map is published as a port, never as a directory', () => {
+  // `tailscale serve <path>` is refused outright by the Mac build, and getting
+  // it wrong is a hard error at the operator rather than a red test.
+  //
+  // Scoped to PUBLISHING invocations — the ones carrying --bg. That is what
+  // the invariant is actually about, and it is the fifth shape of this test:
+  // three deny-lists each missed a form, and the allow-list that replaced them
+  // rejected `serve status`, `serve reset` and `serve off`, which are not
+  // paths at all. A test that fails a correct command gets loosened or
+  // deleted, so matching the real predicate matters more than tightening it.
+  const publishes = skillCommands().filter((c) => c.includes('"serve"') && c.includes('"--bg"'));
+  assert.equal(publishes.length, 1, 'exactly one publishing invocation');
 
-  for (const serve of serves) {
+  for (const serve of publishes) {
     const argv = serve.split(',').map((x) => x.trim().replace(/^"|"$/g, ''));
     const after = argv.slice(argv.indexOf('serve') + 1);
-    const notAFlagOrPort = after.filter((x) => !x.startsWith('-') && !/^\d+$/.test(x));
-    assert.deepEqual(notAFlagOrPort, [], `only flags and a port may follow serve: ${serve}`);
+    assert.deepEqual(after, ['--bg', '8787'], `publish a bare port: ${serve}`);
   }
 });
 
