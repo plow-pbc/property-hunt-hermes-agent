@@ -1,28 +1,25 @@
 #!/usr/bin/env node
-// Listing URL -> a saved property. The single entrypoint for adding or
-// refreshing: it scrapes, geocodes, downloads the photo, and writes the store.
+// A harvested page -> a saved property. The single entrypoint for adding or
+// refreshing.
 //
-// Runs the page through Camoufox (plain HTTP gets a bot wall), reads only
-// standards-based surfaces, geocodes the address, and downloads the hero photo.
+// The browser lives on the user's Mac, behind latch. The agent drives it with
+// HARVEST_EXPRESSION below and hands the result here; this reads only
+// standards-based surfaces from that payload, geocodes the address, and
+// downloads the hero photo.
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as net from 'node:net';
 import * as dns from 'node:dns/promises';
 import * as http from 'node:http';
 import * as https from 'node:https';
-import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 
 import { extractScraped, geocodeQuery } from './extract.ts';
 import type { PageSurfaces } from './extract.ts';
-import { coerceScraped, readStore, slugify, upsertScraped, writeStore } from './store.ts';
+import { coerceScraped, readStore, slugify, storableUrl, upsertScraped, writeStore } from './store.ts';
 import type { Scraped } from './store.ts';
 import { resolveDataDir } from './properties.ts';
 
-const require = createRequire(import.meta.url);
-
-const RENDER_TIMEOUT_MS = 45_000;
-const POLL_INTERVAL_MS = 750;
 const MAX_PHOTO_REDIRECTS = 3;
 const MAX_PHOTO_BYTES = 20 * 1024 * 1024;
 const PHOTO_TIMEOUT_MS = 20_000;
@@ -30,9 +27,7 @@ const NOMINATIM = 'https://nominatim.openstreetmap.org/search';
 // Nominatim's usage policy requires a descriptive agent identifying the app.
 const USER_AGENT = 'property-hunt/0.1 (personal property tracker; https://clawhub.ai)';
 
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
-
-/** A browser failure is a tool *result*, not a crashed command — see plow-browser-usage. */
+/** A failed lookup is a tool *result*, not a crashed command: the agent reads it and speaks. */
 function toolError(error: string): void {
   process.stdout.write(`${JSON.stringify({ type: 'tool_error', error })}\n`);
 }
@@ -42,73 +37,103 @@ function note(message: string): void {
 }
 
 /**
- * Read the page's structured surfaces. Deliberately no DOM selectors: only
- * JSON-LD and Open Graph, so a cosmetic redesign can't break the scrape.
+ * The JS the agent hands to latch's `plow_browser` eval.
+ *
+ * It polls INSIDE the page because `goto` resolves while a listing is still a
+ * client-side shell, and reading that shell looks exactly like a bot wall. The
+ * deadline is 10s rather than the 45s the in-process loop used: `plow_browser`
+ * is non-deferrable and latch's call budget is 15s, so a longer poll is killed
+ * mid-flight. The agent re-runs this up to three times, which restores the
+ * original budget.
+ *
+ * `settled` is the load-bearing part. It says which exit the poll took —
+ * predicate satisfied, or deadline reached — so the caller can tell "this page
+ * had not finished rendering" from "this page does not carry that field"
+ * without guessing from the error text. SKILL.md carries this string verbatim
+ * and a test pins the two together.
  */
-async function harvest(browser: any, url: string): Promise<PageSurfaces> {
-  const jsonldText: string[] = await browser.eval(
-    `[...document.querySelectorAll('script[type="application/ld+json"]')].map(s => s.textContent)`,
-  );
-  const og: Record<string, string> = await browser.eval(
-    `Object.fromEntries([...document.querySelectorAll('meta[property^="og:"], meta[name^="twitter:"]')]
-       .map(m => [m.getAttribute('property') || m.getAttribute('name'), m.content || '']))`,
-  );
+export const HARVEST_EXPRESSION =
+  `(async () => { ` +
+  `const read = () => ({ ` +
+  `jsonld: [...document.querySelectorAll('script[type="application/ld+json"]')].map(s => s.textContent), ` +
+  `og: Object.fromEntries([...document.querySelectorAll('meta[property^="og:"], meta[name^="twitter:"]')]` +
+  `.map(m => [m.getAttribute('property') || m.getAttribute('name'), m.content || ''])) ` +
+  `}); ` +
+  `const deadline = Date.now() + 10000; ` +
+  `let seen = read(); ` +
+  `while (Date.now() < deadline) { ` +
+  `if (seen.jsonld.length && Object.keys(seen.og).length) return { ...seen, settled: true }; ` +
+  `await new Promise(r => setTimeout(r, 750)); ` +
+  `seen = read(); ` +
+  `} ` +
+  `return { ...seen, settled: false }; ` +
+  `})()`;
+
+/**
+ * The agent hands back raw JSON-LD *text*, exactly as the page carries it, so
+ * the tolerant parse lives here rather than in the page: one malformed block is
+ * normal and the others still carry the listing.
+ *
+ * A payload with no `settled` reads as NOT settled. That is the safe direction:
+ * it costs a retry that may not have been needed, where the other reading
+ * suppresses a retry the page still needed.
+ */
+export function parseHarvest(raw: string, url: string): { page: PageSurfaces; settled: boolean } {
+  let payload: unknown;
+  try {
+    payload = JSON.parse(raw);
+  } catch {
+    throw new Error('harvest payload is not JSON — pass the eval result through unchanged');
+  }
+  const shape = payload as { jsonld?: unknown; og?: unknown; settled?: unknown };
+  if (!Array.isArray(shape.jsonld)) throw new Error("harvest payload has no 'jsonld' array");
+  if (!shape.og || typeof shape.og !== 'object' || Array.isArray(shape.og)) {
+    throw new Error("harvest payload has no 'og' object");
+  }
   const jsonld: unknown[] = [];
-  for (const text of jsonldText ?? []) {
+  for (const text of shape.jsonld) {
     try {
-      jsonld.push(JSON.parse(text));
+      jsonld.push(JSON.parse(String(text)));
     } catch {
       // A single malformed block is normal; the others still carry the listing.
     }
   }
-  return { url, jsonld, og: og ?? {} };
+  return { page: { url, jsonld, og: shape.og as Record<string, string> }, settled: shape.settled === true };
 }
 
 /**
- * `goto` resolves while the page is still a client-side shell — a fixed sleep
- * either wastes time or reads an empty page and looks exactly like a bot wall.
- * Poll instead, until the page yields a record the store will actually accept.
+ * Did this page fail because it had not finished rendering, or because it does
+ * not carry the field at all?
  *
- * Validating *inside* the loop is the point: a page can mount its JSON-LD
- * (whose PostalAddress often has no postalCode) before the og:title that
- * carries the full "…, San Francisco, CA 94131" line. Checking only after the
- * loop would abort on that half-rendered state when one more poll would have
- * produced a saveable record — the retry mechanism has to be able to see the
- * failure it exists to ride out.
+ * The in-process loop answered that with time: it polled for 45s and gave up at
+ * the deadline. The in-page poll answers it the same way and reports which exit
+ * it took, so this reads a measurement rather than inferring intent from the
+ * error text — a missing field on a half-mounted page and on a finished one
+ * raise the identical message.
  */
-export async function scrapeRendered(
-  browser: any,
-  url: string,
-  timeoutMs: number = RENDER_TIMEOUT_MS,
-): Promise<{ scraped: Scraped; photoUrl: string | null }> {
-  await browser.goto(url);
-  const deadline = Date.now() + timeoutMs;
-  let lastError = 'page never rendered a listing';
-  while (Date.now() < deadline) {
-    try {
-      const { scraped, photoUrl } = extractScraped(await harvest(browser, url));
-      // The same rules `upsert` applies — so anything unsaveable fails here,
-      // before the geocode and photo download that would otherwise leave an
-      // orphaned image named for a slug no row will ever carry.
-      return { scraped: coerceScraped(scraped), photoUrl };
-    } catch (err) {
-      lastError = (err as Error).message;
-      await sleep(POLL_INTERVAL_MS);
-    }
+function reportHarvestFailure(url: string, settled: boolean, problem: string): void {
+  if (settled) {
+    // No test of the error text. extractScraped now throws only for the
+    // identity fields — address, city, state, zip — because the two
+    // site-controlled URLs it used to throw on both degrade instead: a bad
+    // image loses the pin its photo, a bad canonical URL falls back to the
+    // page. So every way of reaching this branch IS a missing field, and the
+    // conjunction that used to guard this sentence had no remaining case.
+    toolError(
+      `read ${url}, but it does not publish a saveable listing. Last problem: ${problem}. ` +
+        'If the page genuinely does not publish that field, try this property on another ' +
+        'listing site — do not supply a value of your own.',
+    );
+    return;
   }
-  // Everything the loop swallows lands here — a thin page, but also a bot
-  // wall, a page crash, or a browser that went away mid-run. Only offer the
-  // "try another site" remedy when the page actually rendered and simply
-  // lacked a field; prescribing it for a browser failure sends the agent off
-  // after the wrong problem.
-  const missingField = /is required|could not find an address|no usable characters/.test(lastError);
-  throw new Error(
-    `could not read a saveable listing from ${url} after ${timeoutMs / 1000}s. ` +
-      `Last problem: ${lastError}.` +
-      (missingField
-        ? ' If the page genuinely does not publish that field, try this property on another' +
-          ' listing site — do not supply a value of your own.'
-        : ''),
+  process.stdout.write(
+    `${JSON.stringify({
+      type: 'tool_error',
+      retryable: true,
+      error:
+        `${url} had not rendered a saveable listing when the page was read. ` +
+        `Last problem: ${problem}. Run the eval again and re-run this command — up to three attempts.`,
+    })}\n`,
   );
 }
 
@@ -274,11 +299,11 @@ function getPinned(
   });
 }
 
-async function downloadPhoto(photoUrl: string, dir: string, id: string): Promise<string> {
+async function downloadPhoto(photoUrl: string, dir: string, id: string, base: URL): Promise<string> {
   // Every hop is resolved and vetted, then connected to by address — a public
   // URL that 302s inward, or a name that rebinds between check and connect,
   // both fail here rather than reaching the network behind us.
-  let hop = await resolvePublicDestination(photoUrl);
+  let hop = await resolvePublicDestination(photoUrl, base);
   let response = await getPinned(hop.url, hop.address, hop.family);
 
   for (let redirects = 0; response.status >= 300 && response.status < 400; redirects += 1) {
@@ -334,9 +359,9 @@ export function keepPreviousEnrichment(
 }
 
 async function main(): Promise<void> {
-  const url = process.argv[2];
-  if (!url || !/^https?:\/\//i.test(url)) {
-    toolError("usage: node scrape.ts '<listing-url>'");
+  const url = process.argv[2] === '--harvest' ? (process.argv[4] ?? '') : '';
+  if (!storableUrl(url)) {
+    toolError("usage: node scrape.ts --harvest '<eval-result-json>' '<listing-url>'");
     return;
   }
 
@@ -347,18 +372,27 @@ async function main(): Promise<void> {
   const dir = resolveDataDir();
   const before = readStore(dir);
 
-  const { connect } = require('plow-browser');
-  let browser: any;
+  let scraped: Scraped;
+  let photoUrl: string | null;
+  let page: PageSurfaces;
+  let settled: boolean;
   try {
-    browser = connect(process.env.CAMOUFOX_RPC_ENDPOINT);
+    ({ page, settled } = parseHarvest(process.argv[3] ?? '', url));
   } catch (err) {
-    if ((err as Error & { name?: string })?.name === 'BrowserNotConnected') {
-      return toolError('browser unavailable: endpoint not provisioned — enable Plow Browser in Settings');
-    }
-    throw err;
+    // The caller's payload, not the page — another poll changes nothing.
+    return toolError((err as Error).message);
+  }
+  try {
+    const extracted = extractScraped(page);
+    // The same rules `upsert` applies, so anything unsaveable fails here,
+    // before the geocode and photo download that would otherwise leave an
+    // orphaned image named for a slug no row will ever carry.
+    scraped = coerceScraped(extracted.scraped);
+    photoUrl = extracted.photoUrl;
+  } catch (err) {
+    return reportHarvestFailure(url, settled, (err as Error).message);
   }
 
-  const { scraped, photoUrl } = await scrapeRendered(browser, url);
   const id = slugify(scraped);
 
   // Neither of the next two failures should lose the listing: a property with
@@ -377,7 +411,7 @@ async function main(): Promise<void> {
 
   if (photoUrl) {
     try {
-      scraped.photo = await downloadPhoto(photoUrl, dir, id);
+      scraped.photo = await downloadPhoto(photoUrl, dir, id, new URL(url));
     } catch (err) {
       note(`photo download failed (${(err as Error).message}) — the pin will use a plain marker`);
     }
@@ -392,17 +426,11 @@ async function main(): Promise<void> {
   process.stdout.write(`${next.length > before.length ? 'added' : 'refreshed'} ${id}\n`);
 }
 
-// Only run when invoked directly, so tests can import scrapeRendered.
+// Only run when invoked directly, so tests can import the pieces above.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((err) => {
     const name = (err as Error & { name?: string })?.name ?? 'Error';
     const detail = String((err as Error)?.message ?? err);
-    toolError(
-      name === 'BrowserNotConnected'
-        ? 'browser unavailable: service unreachable (it may be restarting — retry once after 60s)'
-        : detail.startsWith(`${name}:`)
-          ? detail
-          : `${name}: ${detail}`,
-    );
+    toolError(detail.startsWith(`${name}:`) ? detail : `${name}: ${detail}`);
   });
 }

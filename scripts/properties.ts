@@ -25,20 +25,18 @@ const USAGE = `property-hunt store
 
 Adding and refreshing a property is a separate command — see SKILL.md.
 
-The data folder is $PROPERTY_HUNT_DIR, else /workspace/host/properties inside
-the agent VM, else ~/Plow/properties on a Mac.
+The data folder is $PROPERTY_HUNT_DIR, else ~/Plow/properties.
 
-A single-quoted value cannot contain an apostrophe, and notes do ("don't love
-the kitchen"). Replace each ' with '\\'' before quoting.`;
+Values are passed as separate arguments, never concatenated into one string, so
+an apostrophe in a note needs no escaping.`;
 
 /**
- * Resolve the data folder. The same code runs inside the agent container and on
- * the host during smoke tests, and those see the same bytes under two names.
+ * Resolve the data folder. Everything runs on the user's own Mac now, so there
+ * is one real answer and one override the tests use.
  */
 export function resolveDataDir(env: NodeJS.ProcessEnv = process.env): string {
   const override = env.PROPERTY_HUNT_DIR?.trim();
   if (override) return path.resolve(override);
-  if (fs.existsSync('/workspace/host')) return '/workspace/host/properties';
   return path.join(os.homedir(), 'Plow', 'properties');
 }
 

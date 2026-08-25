@@ -4,41 +4,17 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import {
+  HARVEST_EXPRESSION,
   isPrivateAddress,
   keepPreviousEnrichment,
+  parseHarvest,
   resolvePublicDestination,
-  scrapeRendered,
 } from './scrape.ts';
 import type { Scraped } from './store.ts';
-
-// A stand-in for the Camoufox proxy. Only `goto` and `eval` are used, and
-// `eval` is dispatched on which surface the caller asked for — so a page can be
-// made to render in stages, which is the whole point of the retry loop.
-function fakeBrowser(states: Array<{ jsonld: unknown[]; og: Record<string, string> }>) {
-  let poll = 0;
-  return {
-    polls: () => poll,
-    async goto() {},
-    async eval(expression: string) {
-      // One harvest reads json-ld then og. Both must see the SAME state or the
-      // fake invents a half-and-half page that never occurs in reality.
-      const current = states[Math.min(poll, states.length - 1)];
-      if (expression.includes('ld+json')) {
-        return current.jsonld.map((block) => JSON.stringify(block));
-      }
-      poll += 1; // og is read second — advance only once the harvest is done
-      return current.og;
-    },
-  };
-}
-
-// The give-up path waits out the full render budget, so tests pass a short one
-// rather than sitting through the 45s production default.
-const SHORT_TIMEOUT_MS = 2_000;
 
 const URL_ = 'https://www.compass.com/homedetails/424-28th-St-San-Francisco-CA-94131/1QUY9H_pid/';
 
@@ -63,67 +39,19 @@ const FULL_OG = {
   'og:image': 'https://www.compass.com/m/abc/origin.jpg',
 };
 
-test('a page that renders in stages is retried, not abandoned', async () => {
-  // Poll 1: JSON-LD has mounted (no postalCode) but og:title has not, so the
-  // record is unkeyable. Poll 2: og:title arrives and it becomes saveable.
-  // Before the retry landed inside the loop, poll 1 aborted the whole run.
-  const browser = fakeBrowser([
-    { jsonld: [RESIDENCE], og: {} },
-    { jsonld: [RESIDENCE], og: FULL_OG },
-  ]);
-
-  const { scraped } = await scrapeRendered(browser, URL_);
-
-  assert.equal(scraped.zip, '94131');
-  assert.equal(scraped.city, 'San Francisco');
-  assert.equal(scraped.price, 3250000);
-  assert.ok(browser.polls() > 1, 'the first poll must not have been treated as final');
-});
-
-test('a page that never becomes saveable reports what was missing and where', async () => {
-  const browser = fakeBrowser([{ jsonld: [RESIDENCE], og: {} }]);
-
-  await assert.rejects(
-    () => scrapeRendered(browser, URL_, SHORT_TIMEOUT_MS),
-    (err: Error) => {
-      assert.match(err.message, /could not read a saveable listing/);
-      assert.match(err.message, /424-28th-St/, 'the URL is needed to act on this');
-      assert.match(err.message, /zip is required/, 'and the actual blocker');
-      assert.match(err.message, /another listing site/, 'a missing field is worth trying elsewhere');
-      return true;
-    },
-  );
-});
-
-test('a browser failure is not reported as a missing field', async () => {
-  // A bot wall or a browser that goes away mid-run lands in the same catch.
-  // Telling the agent to "try another listing site" would send it after the
-  // wrong problem entirely.
-  const broken = {
-    async goto() {},
-    async eval() {
-      throw Object.assign(new Error('connection refused'), { name: 'BrowserRpcError' });
-    },
-  };
-
-  await assert.rejects(
-    () => scrapeRendered(broken, URL_, SHORT_TIMEOUT_MS),
-    (err: Error) => {
-      assert.match(err.message, /connection refused/);
-      assert.doesNotMatch(err.message, /another listing site/);
-      return true;
-    },
-  );
-});
-
 test('scraping into an uninitialized folder costs nothing and says what to do', async () => {
-  // The guard runs before connect(), so this needs no browser. Without it,
-  // readStore raised a bare ENOENT *after* the browser run, the geocode, and a
-  // photo download that had already created photos/ and an orphaned image.
+  // The guard runs before anything is parsed, so a good payload still writes
+  // nothing. Without it, readStore raised a bare ENOENT *after* the geocode and
+  // a photo download that had already created photos/ and an orphaned image.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'property-hunt-uninit-'));
   const out = execFileSync(
     process.execPath,
-    [fileURLToPath(new URL('./scrape.ts', import.meta.url)), 'https://example.com/listing/1'],
+    [
+      fileURLToPath(new URL('./scrape.ts', import.meta.url)),
+      '--harvest',
+      JSON.stringify({ jsonld: [JSON.stringify(RESIDENCE)], og: FULL_OG, settled: true }),
+      URL_,
+    ],
     { env: { ...process.env, PROPERTY_HUNT_DIR: dir }, encoding: 'utf8' },
   );
 
@@ -243,4 +171,244 @@ test('a carried-forward photo must still exist on disk', () => {
   const second = { lat: 1, lng: 2, photo: null } as unknown as Scraped;
   assert.deepEqual(keepPreviousEnrichment(second, previous, dir), ['photo']);
   assert.equal(second.photo, 'photos/gone.jpg');
+});
+
+// --- the latch-backed harvest path -----------------------------------------
+
+test('the harvest expression reads the surfaces extractScraped consumes', () => {
+  // Only what running it cannot prove: the selectors have to match what
+  // extract.ts reads, and the deadline is shadowed by the run test below, so
+  // a change to it would otherwise pass unnoticed.
+  assert.match(HARVEST_EXPRESSION, /script\[type="application\/ld\+json"\]/);
+  assert.match(HARVEST_EXPRESSION, /meta\[property\^="og:"\], meta\[name\^="twitter:"\]/);
+  assert.match(HARVEST_EXPRESSION, /Date\.now\(\) \+ 10000/, 'inside latch 15s call budget');
+  assert.doesNotMatch(HARVEST_EXPRESSION, /\n/, 'travels as one JSON string field');
+});
+
+test('a malformed json-ld block does not lose the listing', () => {
+  const { page } = parseHarvest(
+    JSON.stringify({ jsonld: ['{not json', JSON.stringify(RESIDENCE)], og: FULL_OG, settled: true }),
+    URL_,
+  );
+  assert.equal(page.url, URL_);
+  assert.equal(page.jsonld.length, 1, 'the parseable block survives its broken neighbour');
+  assert.equal(page.og['og:title'], FULL_OG['og:title']);
+});
+
+test('parseHarvest reports whether the page settled or timed out', () => {
+  const base = { jsonld: [], og: {} };
+  assert.equal(parseHarvest(JSON.stringify({ ...base, settled: true }), URL_).settled, true);
+  assert.equal(parseHarvest(JSON.stringify({ ...base, settled: false }), URL_).settled, false);
+  // An older payload with no flag must not silently read as "fully rendered" —
+  // that is the reading that would suppress a retry the page still needs.
+  assert.equal(parseHarvest(JSON.stringify(base), URL_).settled, false, 'absent means not settled');
+});
+
+function initStore(): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'property-hunt-harvest-'));
+  execFileSync(process.execPath, [fileURLToPath(new URL('./properties.ts', import.meta.url)), 'init'], {
+    env: { ...process.env, PROPERTY_HUNT_DIR: dir },
+    encoding: 'utf8',
+  });
+  return dir;
+}
+
+function harvestInto(dir: string, payload: unknown, url: string = URL_): string {
+  return execFileSync(
+    process.execPath,
+    [
+      fileURLToPath(new URL('./scrape.ts', import.meta.url)),
+      '--harvest',
+      typeof payload === 'string' ? payload : JSON.stringify(payload),
+      url,
+    ],
+    { env: { ...process.env, PROPERTY_HUNT_DIR: dir }, encoding: 'utf8' },
+  );
+}
+
+test('--harvest saves a listing without touching a browser', () => {
+  const dir = initStore();
+  const out = harvestInto(dir, {
+    jsonld: [JSON.stringify(RESIDENCE)],
+    og: FULL_OG,
+    settled: true,
+  });
+
+  assert.match(out, /^added /, 'prints the same verb the browser path printed');
+  const store = fs.readFileSync(path.join(dir, 'data.js'), 'utf8');
+  assert.match(store, /424 28th St/);
+  assert.match(store, /"zip": "94131"/, 'the zip came from og:title, as it does in production');
+});
+
+test('whether a failure is worth retrying is decided by how the poll exited', () => {
+  // A missing field raises the identical message whether the page is
+  // half-mounted or simply does not carry it, so `settled` is the only honest
+  // discriminator. Getting this backwards either spins on a page that will
+  // never yield, or gives up on the exact case the old in-process loop rode
+  // out and then succeeded on.
+  for (const { name, payload, retryable, says } of [
+    {
+      name: 'json-ld up, og not, poll timed out — the shape the old loop retried',
+      payload: { jsonld: [JSON.stringify(RESIDENCE)], og: {}, settled: false },
+      retryable: true,
+      says: /zip is required/,
+    },
+    {
+      name: 'nothing mounted at all',
+      payload: { jsonld: [], og: {}, settled: false },
+      retryable: true,
+      says: /could not find an address/,
+    },
+    {
+      name: 'both surfaces settled and still no address',
+      payload: {
+        jsonld: [],
+        og: { 'og:title': 'Listings near you', 'og:description': 'Browse homes for sale' },
+        settled: true,
+      },
+      retryable: false,
+      says: /another listing site/,
+    },
+  ]) {
+    const dir = initStore();
+    const before = fs.readFileSync(path.join(dir, 'data.js'), 'utf8');
+    const result = JSON.parse(harvestInto(dir, payload).trim());
+
+    assert.equal(result.type, 'tool_error', name);
+    assert.equal(Boolean(result.retryable), retryable, name);
+    assert.match(result.error, says, name);
+    assert.equal(
+      fs.readFileSync(path.join(dir, 'data.js'), 'utf8'),
+      before,
+      `${name}: a failed harvest leaves the store byte-identical`,
+    );
+  }
+});
+
+test('--harvest rejects a payload that is not the two surfaces', () => {
+  const dir = initStore();
+  for (const bad of ['not json at all', '{"og":{}}', '{"jsonld":"a string","og":{}}']) {
+    const payload = JSON.parse(harvestInto(dir, bad).trim());
+    assert.equal(payload.type, 'tool_error', `rejected: ${bad}`);
+    assert.ok(!payload.retryable, 'a malformed payload is the caller to fix, not the page');
+  }
+});
+
+test('--harvest refuses a url that is not one', () => {
+  const dir = initStore();
+  const payload = JSON.parse(
+    harvestInto(dir, { jsonld: [], og: {}, settled: true }, 'not-a-url').trim(),
+  );
+  assert.equal(payload.type, 'tool_error');
+  assert.match(payload.error, /--harvest/, 'the usage line names the mode actually being used');
+});
+
+test('the harvest expression actually runs, and reports which exit it took', async () => {
+  // Every other assertion about this string is a regex over its source. It is
+  // the one piece of this skill that executes somewhere we cannot reach from
+  // here, so a syntax error or a renamed field would ship green and fail only
+  // in the page, where the symptom is a scrape that never works.
+  //
+  // `Date` and `setTimeout` are shadowed as parameters so the deadline path can
+  // be proven without spending ten real seconds on it.
+  const makeDoc = (jsonld: string[], og: Record<string, string>) => ({
+    querySelectorAll(selector: string) {
+      if (selector.includes('ld+json')) return jsonld.map((textContent) => ({ textContent }));
+      return Object.entries(og).map(([key, content]) => ({
+        getAttribute: (attr: string) => (attr === 'property' ? key : null),
+        content,
+      }));
+    },
+  });
+
+  const run = (doc: unknown) => {
+    let clock = 0;
+    const clockedDate = { now: () => clock };
+    let ticks = 0;
+    const instantly = (fn: () => void, ms: number) => {
+      // Bounded on purpose. The interval is the only thing moving this clock
+      // toward the deadline, so dropping it to 0 would spin here forever —
+      // and node:test has no default per-test timeout, so the suite would hang
+      // rather than fail. Fail loudly instead.
+      if ((ticks += 1) > 100) throw new Error('harvest expression did not reach its deadline in 100 polls');
+      clock += ms;
+      fn();
+    };
+    return new Function('document', 'Date', 'setTimeout', `return ${HARVEST_EXPRESSION}`)(
+      doc,
+      clockedDate,
+      instantly,
+    ) as Promise<{ jsonld: string[]; og: Record<string, string>; settled: boolean }>;
+  };
+
+  const ready = await run(makeDoc(['{"@type":"House"}'], { 'og:title': '424 28th St' }));
+  assert.deepEqual(ready.jsonld, ['{"@type":"House"}'], 'json-ld comes back as raw text, not parsed');
+  assert.equal(ready.og['og:title'], '424 28th St');
+  assert.equal(ready.settled, true, 'both surfaces present on the first read');
+
+  const stillEmpty = await run(makeDoc([], {}));
+  assert.equal(stillEmpty.settled, false, 'reached the deadline with a surface still empty');
+  assert.deepEqual(stillEmpty.jsonld, []);
+
+  // The half-mounted shape: json-ld up, og not. This is the case the old
+  // in-process loop rode out, and it must read as unsettled rather than as a
+  // page that simply has no address.
+  const halfway = await run(makeDoc(['{"@type":"House"}'], {}));
+  assert.equal(halfway.settled, false, 'one empty surface is not a settled page');
+
+  // And the payload the expression produces must be what parseHarvest accepts.
+  const { page, settled } = parseHarvest(JSON.stringify(ready), URL_);
+  assert.equal(settled, true);
+  assert.deepEqual(page.jsonld, [{ '@type': 'House' }], 'the two halves agree on the wire format');
+});
+
+test('a photo that cannot be fetched costs the pin its picture, and says so', () => {
+  // The end of the chain the malformed-image fix opened up: extractScraped
+  // hands the bad URL on, downloadPhoto fails on it, and the listing is saved
+  // anyway with the user told why. Asserted here rather than at extract level
+  // because the contract that matters is "the house is on the map, without a
+  // photo" — not what one function returned.
+  const dir = initStore();
+  const run = spawnSync(
+    process.execPath,
+    [
+      fileURLToPath(new URL('./scrape.ts', import.meta.url)),
+      '--harvest',
+      JSON.stringify({
+        jsonld: [JSON.stringify(RESIDENCE)],
+        og: { ...FULL_OG, 'og:image': 'http://[[[bad' },
+        settled: true,
+      }),
+      URL_,
+    ],
+    { env: { ...process.env, PROPERTY_HUNT_DIR: dir }, encoding: 'utf8' },
+  );
+
+  assert.match(run.stdout, /^added /, 'the listing is saved');
+  assert.match(run.stderr, /photo download failed .* the pin will use a plain marker/);
+  const saved = JSON.parse(fs.readFileSync(path.join(dir, 'data.js'), 'utf8').split('=')[1]);
+  assert.equal(saved.length, 1);
+  assert.equal(saved[0].scraped.photo, null, 'an honest empty photo, not a broken path');
+  assert.equal(saved[0].scraped.address, '424 28th St');
+});
+
+test('a listing linking somewhere that is not the web still lands, on the page url', () => {
+  // mailto: and javascript: parse, so a loop that accepted anything parseable
+  // took them and then failed the record at coerceScraped — with the page URL,
+  // already validated as http(s), sitting one candidate away. Asserted
+  // end-to-end because the unit boundary is exactly where that hole hid: the
+  // extract-level test passed while the save was discarded.
+  for (const url of ['mailto:agent@example.com', 'javascript:void(0)']) {
+    const dir = initStore();
+    const out = harvestInto(dir, {
+      jsonld: [JSON.stringify({ ...RESIDENCE, url })],
+      og: FULL_OG,
+      settled: true,
+    });
+
+    assert.match(out, /^added /, `saved despite a ${url} canonical link`);
+    const saved = JSON.parse(fs.readFileSync(path.join(dir, 'data.js'), 'utf8').split('=')[1]);
+    assert.equal(saved[0].scraped.listing_url, URL_, 'fell back to the page it was read from');
+    assert.equal(saved[0].scraped.listing_source, 'compass.com', 'so the source label still derives');
+  }
 });

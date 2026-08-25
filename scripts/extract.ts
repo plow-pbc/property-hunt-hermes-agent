@@ -6,7 +6,7 @@
 // meta. No DOM selectors anywhere, which is what keeps it working across a
 // cosmetic redesign — and what lets it generalize past Compass, since
 // listing_url accepts any host.
-import { UNIT_DESIGNATOR } from './store.ts';
+import { storableUrl, UNIT_DESIGNATOR } from './store.ts';
 import type { Scraped } from './store.ts';
 
 export type PageSurfaces = {
@@ -154,7 +154,12 @@ function statusFrom(availability: unknown): string | null {
  * filled after the image is downloaded. The remote URL comes back alongside it
  * rather than being crammed into the same field.
  */
-export type Extracted = { scraped: Scraped; photoUrl: string | null };
+/**
+ * `listing_source` is absent on purpose: coerceScraped derives it from the same
+ * parsed URL it validates, so the label has one owner. Deriving it here as well
+ * meant the copy the app displayed was not the copy the store's tests covered.
+ */
+export type Extracted = { scraped: Omit<Scraped, 'listing_source'>; photoUrl: string | null };
 
 /**
  * Build a record from a page's structured surfaces.
@@ -202,17 +207,33 @@ export function extractScraped(page: PageSurfaces, now: string = new Date().toIS
   const floorPlan = listing ? (firstDeep(listing, 'accommodationFloorPlan') as Record<string, unknown> | undefined) : undefined;
   const floorSize = listing ? firstDeep(listing, 'floorSize') : undefined;
 
-  // og:url and JSON-LD url are sometimes site-relative; resolve against the page.
-  const listingUrl = new URL(
-    (typeof listing?.url === 'string' ? listing.url : undefined) ?? og['og:url'] ?? page.url,
+  // og:url and JSON-LD url are sometimes site-relative; resolve against the
+  // page. Both are site-controlled text, so take the first candidate that
+  // PARSES rather than throwing on the first that does not — a page
+  // advertising a broken canonical URL should cost the record its link, not
+  // its existence. page.url is last and main() has already validated it as
+  // http(s), so this always lands.
+  let listingUrl = page.url;
+  for (const candidate of [
+    typeof listing?.url === 'string' ? listing.url : undefined,
+    og['og:url'],
     page.url,
-  ).href;
+  ]) {
+    // Parsing is not the bar; the store's is, and storableUrl is where it
+    // lives. Accepting anything that merely PARSED took a page's own
+    // `mailto:` link and then failed the record on it downstream.
+    const resolved = storableUrl(candidate, page.url);
+    if (!resolved) continue;
+    listingUrl = resolved.href;
+    break;
+  }
 
   const image = listing ? firstDeep(listing, 'image') : undefined;
   const imageUrl =
     (typeof firstDeep(image, 'url') === 'string' ? (firstDeep(image, 'url') as string) : undefined) ??
     (typeof image === 'string' ? image : undefined) ??
     og['og:image'];
+
 
   const propertyType =
     listing ? typesOf(listing).find((t) => t !== 'Product' && t !== 'RealEstateListing') ?? null : null;
@@ -232,10 +253,13 @@ export function extractScraped(page: PageSurfaces, now: string = new Date().toIS
       property_type: propertyType,
       listing_status: statusFrom(offers?.availability),
       listing_url: listingUrl,
-      listing_source: new URL(listingUrl).hostname.replace(/^www\./, ''),
       photo: null,
       last_scraped_at: now,
     },
-    photoUrl: imageUrl ? new URL(imageUrl, page.url).href : null,
+    // Unresolved on purpose. downloadPhoto resolves it against the page, and
+    // its failure is already reported as "the pin will use a plain marker" —
+    // so resolving here too would be a second place parsing the same URL, and
+    // a silent one.
+    photoUrl: imageUrl ?? null,
   };
 }

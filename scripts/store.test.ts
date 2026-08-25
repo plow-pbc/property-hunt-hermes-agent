@@ -15,11 +15,18 @@ import {
   emptyStoreText,
   coerceScraped,
   removeProperty,
+  storableUrl,
 } from './store.ts';
 import type { Scraped } from './store.ts';
 
+// Built THROUGH coerceScraped, not beside it. Assembling the literal directly
+// let the fixture produce a record no real path can: with listing_source
+// dropped from the literal the return no longer satisfied Scraped, and every
+// test riding this fixture serialized a row missing the label — which the map
+// renders as "View on undefined". Going through the owner also makes the
+// round-trip tests load-bearing for the derivation.
 function scraped(over: Partial<Scraped> = {}): Scraped {
-  return {
+  return coerceScraped({
     address: '424 28th Street',
     city: 'San Francisco',
     state: 'CA',
@@ -33,11 +40,10 @@ function scraped(over: Partial<Scraped> = {}): Scraped {
     property_type: 'SingleFamilyResidence',
     listing_status: 'active',
     listing_url: 'https://www.compass.com/homedetails/424-28th-St-San-Francisco-CA-94131/1QUY9H_pid/',
-    listing_source: 'compass.com',
     photo: null,
     last_scraped_at: '2026-08-14T19:00:00.000Z',
     ...over,
-  };
+  });
 }
 
 function tmpdir(): string {
@@ -213,6 +219,9 @@ test('a listing from any site is accepted and labeled by its host', () => {
     ['https://www.compass.com/homedetails/x/1_pid/', 'compass.com'],
     ['https://www.zillow.com/homedetails/x/1_zpid/', 'zillow.com'],
     ['https://redfin.com/CA/SF/x', 'redfin.com'],
+    // Lenient spellings reach the label through the same parsed object.
+    ['https:www.compass.com/p/1', 'compass.com'],
+    ['  https://www.zillow.com/p/1  ', 'zillow.com'],
   ] as const) {
     assert.equal(coerceScraped({ ...VALID, listing_url: url }).listing_source, expected);
   }
@@ -270,4 +279,44 @@ test('a write leaves no scratch files behind', () => {
   const dir = tmpdir();
   writeStore(dir, upsertScraped([], scraped()));
   assert.deepEqual(fs.readdirSync(dir), ['data.js'], 'the tmp file must be renamed, not left alongside');
+});
+
+test('one rule decides what may be a listing url', () => {
+  // Three files used to spell this independently. It lives here now because
+  // the store is what rejects a bad one, and the bug it prevents is another
+  // caller accepting something this would refuse.
+  for (const [raw, base, expected] of [
+    ['https://www.compass.com/p/1', undefined, 'https://www.compass.com/p/1'],
+    ['http://example.com/x', undefined, 'http://example.com/x'],
+    // Parse fine, and are not somewhere the map can send anyone.
+    ['mailto:agent@example.com', undefined, null],
+    ['javascript:void(0)', undefined, null],
+    ['data:text/html,x', undefined, null],
+    ['ftp://files.example.com/x', undefined, null],
+    // Only resolvable against the page, which is why the rule cannot be a
+    // text test on the raw string.
+    ['/p/2', 'https://www.compass.com/p/1', 'https://www.compass.com/p/2'],
+    ['http://[[[bad', undefined, null],
+    ['', undefined, null],
+    [undefined, undefined, null],
+    [42, undefined, null],
+  ] as Array<[unknown, string | undefined, string | null]>) {
+    const got = storableUrl(raw, base);
+    assert.equal(got?.href ?? null, expected, `${JSON.stringify(raw)} against ${base ?? 'no base'}`);
+  }
+});
+
+test('a listing url is stored as the rule wrote it, not as the page spelled it', () => {
+  // `new URL` is lenient about surrounding space and about a special scheme
+  // missing its slashes. Both reach the map's href and the store's dedup
+  // display, so what is validated and what is kept have to be the same object.
+  for (const [given, stored] of [
+    ['  https://www.compass.com/p/1  ', 'https://www.compass.com/p/1'],
+    ['https:www.compass.com/p/1', 'https://www.compass.com/p/1'],
+    ['https://www.compass.com/p/1', 'https://www.compass.com/p/1'],
+  ]) {
+    const row = coerceScraped({ ...VALID, listing_url: given });
+    assert.equal(row.listing_url, stored, given);
+    assert.equal(row.listing_source, 'compass.com', `source derives from the parsed host: ${given}`);
+  }
 });

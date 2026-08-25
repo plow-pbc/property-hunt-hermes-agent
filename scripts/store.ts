@@ -36,6 +36,30 @@ export type Property = { id: string; scraped: Scraped; mine: Mine };
 
 export const MINE_FIELDS = ['rating', 'status', 'notes'] as const;
 
+/**
+ * The one rule for what may be a listing URL, and the only place that decides
+ * it. Resolves `raw` against `base` and returns it only if the store would
+ * accept it; null otherwise, so callers pick their own remedy.
+ *
+ * Three places used to spell this rule independently — the store on the raw
+ * string, extract.ts on a parsed protocol, and scrape.ts on argv. They agreed,
+ * but the bug they exist to prevent IS two of them disagreeing: extract would
+ * accept a candidate, stop looking, and the record would die at the save with
+ * a good fallback one candidate away.
+ */
+export function storableUrl(raw: unknown, base?: string): URL | null {
+  if (typeof raw !== 'string' || raw === '') return null;
+  let url: URL;
+  try {
+    url = new URL(raw, base);
+  } catch {
+    return null;
+  }
+  // Not a text test on the raw string: `mailto:` and `javascript:` parse, and
+  // a relative candidate only reveals its scheme once resolved.
+  return url.protocol === 'http:' || url.protocol === 'https:' ? url : null;
+}
+
 const HEADER = 'window.PROPERTIES =';
 
 // Street-type abbreviations, so "424 28th Street" and "424 28th St" are one house.
@@ -262,10 +286,16 @@ export function coerceScraped(input: unknown): Scraped {
   if (normalizeWords(raw.address as string) === '') {
     throw new Error(`scraped.address has no usable characters: ${JSON.stringify(raw.address)}`);
   }
-  if (typeof raw.listing_url !== 'string' || !/^https?:\/\//i.test(raw.listing_url)) {
+  // Keep what the rule produced rather than re-deriving from the raw text.
+  // `new URL` trims surrounding space and accepts `https:x.com/y` without the
+  // slashes, so validating the parse and then persisting the original string
+  // stored a value the rule itself would not have written — and the map's href
+  // is that string.
+  const listing = storableUrl(raw.listing_url);
+  if (!listing) {
     throw new Error('scraped.listing_url is required and must be an http(s) URL');
   }
-  const listingUrl = raw.listing_url;
+  const listingUrl = listing.href;
 
   const asNumber = (key: string): number | null => {
     const value = raw[key];
@@ -305,7 +335,10 @@ export function coerceScraped(input: unknown): Scraped {
     listing_status: asText('listing_status'),
     listing_url: listingUrl,
     // Any host is supported; the source label just falls out of the URL.
-    listing_source: asText('listing_source') ?? new URL(listingUrl).hostname.replace(/^www\./, ''),
+    // Derived, never accepted. A caller-supplied label was the last way a
+    // stored label could disagree with the URL beside it, and after extract
+    // stopped sending one nothing in production reached that branch anyway.
+    listing_source: listing.hostname.replace(/^www\./, ''),
     photo,
     last_scraped_at: asText('last_scraped_at') ?? new Date().toISOString(),
   };

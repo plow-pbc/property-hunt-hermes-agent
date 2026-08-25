@@ -1,16 +1,16 @@
 # property-hunt
 
-Text Plow a photo of a house for sale. It figures out which house, looks up
-everything the photo doesn't show, and puts it on a private map you can open
-from your Plow folder.
+Text your agent a photo of a house for sale. It figures out which house, looks
+up everything the photo doesn't show, and puts it on a private map you can open
+from Finder.
 
-<!-- Requires Plow — https://plow.co -->
+<!-- Runs on a Hermes agent through Plow Latch — https://howto.plow.co/property-hunt -->
 
 ## What it does
 
 - **Text a screenshot.** Zillow, Compass, a Redfin listing, a photo of a flyer —
-  anything with an address on it. Plow reads the image, finds the real listing,
-  and saves it.
+  anything with an address on it. The agent reads the image, finds the real
+  listing, and saves it.
 - **Talk to it normally.** *"The one on Elm — 3 stars, needs a new roof."*
   *"Mark Oak as passed."* *"Did the Greenwich place drop?"*
 - **Open the map.** `~/Plow/properties/index.html`. Every house is a pin showing
@@ -32,10 +32,13 @@ leave your Mac.
 
 ## Requirements
 
-This skill requires Plow — download at https://plow.co/private-preview — with
-**Plow Browser enabled** (Settings → Plow Browser). Listing sites refuse plain
-HTTP requests, so the lookup runs through Plow's real browser, and the map is
-written to your `~/Plow` folder so you can open it in Finder.
+A Mac running [Plow Latch](https://github.com/plow-pbc/latch), and a Hermes
+agent you can text. Latch is how the agent reaches the Mac: listing sites refuse
+plain HTTP requests, so the lookup runs through the supervised browser there,
+and the scripts run beside the map they write.
+
+[howto.plow.co/property-hunt](https://howto.plow.co/property-hunt) is the
+install guide.
 
 ## Your data
 
@@ -53,12 +56,15 @@ JSON, so you can read it, diff it, or keep it in git.
 ## Development
 
 No dependencies and no build — Node 24 runs the TypeScript directly. From a repo
-checkout — `install-local.ts` is not part of the published skill:
+checkout:
 
 ```sh
-just test                         # the suite
-node scripts/install-local.ts     # install this working copy into ~/Plow/skills
+just test
 ```
+
+Install it by cloning this repo to `~/Plow/skills/property-hunt` on the Mac; the
+guide above has the step. There is no installer binary — the agent runs the
+scripts from wherever the checkout sits.
 
 ## License
 

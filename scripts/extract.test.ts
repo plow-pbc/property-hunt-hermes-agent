@@ -33,7 +33,6 @@ test('a real Compass listing parses into the record the map needs', () => {
   assert.equal(scraped.sqft, 2315, 'floorSize arrives as the string "2,315 "');
   assert.equal(scraped.property_type, 'SingleFamilyResidence');
   assert.equal(scraped.listing_status, 'active', 'schema.org InStock is not a phrase to show a user');
-  assert.equal(scraped.listing_source, 'compass.com');
   assert.match(scraped.listing_url, /424-28th-St-San-Francisco-CA-94131/);
   assert.ok(photoUrl && photoUrl.startsWith('https://'), 'a hero image is needed for the pin');
   assert.equal(scraped.lat, null, 'coordinates are not on this page — scrape.ts geocodes them');
@@ -169,5 +168,50 @@ test('a non-Compass listing parses from open-graph alone', () => {
   assert.equal(scraped.price, 985000);
   assert.equal(scraped.beds, 2);
   assert.equal(scraped.sqft, 1100);
-  assert.equal(scraped.listing_source, 'zillow.com');
+});
+
+// A page carrying only what these two tests are about. COMPASS cannot be used:
+// its json-ld supplies its own `image` and `url`, which outrank the og values,
+// so overriding og there proves nothing.
+const MINIMAL: PageSurfaces = {
+  url: 'https://www.compass.com/homedetails/424-28th-St-San-Francisco-CA-94131/1QUY9H_pid/',
+  jsonld: [
+    {
+      '@type': 'SingleFamilyResidence',
+      address: {
+        '@type': 'PostalAddress',
+        streetAddress: '424 28th St',
+        addressLocality: 'San Francisco',
+        addressRegion: 'CA',
+        postalCode: '94131',
+      },
+      offers: { '@type': 'Offer', price: 3250000 },
+    },
+  ],
+  og: { 'og:title': '424 28th St, San Francisco, CA 94131' },
+};
+
+test('a hero image we cannot parse is handed on, not resolved here', () => {
+  // downloadPhoto resolves it against the page inside the try whose catch
+  // already writes "the pin will use a plain marker". Parsing it here too
+  // would be a second place doing that job, and a silent one — the listing
+  // would lose its photo with nothing said.
+  const { scraped, photoUrl } = extractScraped({
+    ...MINIMAL,
+    og: { ...MINIMAL.og, 'og:image': 'http://[[[bad' },
+  });
+
+  assert.equal(photoUrl, 'http://[[[bad', 'handed on unresolved');
+  assert.equal(scraped.address, '424 28th St', 'and the listing parses regardless');
+  assert.equal(scraped.price, 3250000);
+});
+
+test('a listing whose own url will not parse falls back to the page it was read from', () => {
+  // Both candidates ahead of it are site-controlled text, and page.url has
+  // already been validated as http(s) by the caller. Throwing here discarded a
+  // listing whose address, price and beds had all parsed, with a known-good
+  // fallback sitting one line away.
+  const { scraped } = extractScraped({ ...MINIMAL, og: { ...MINIMAL.og, 'og:url': 'http://[[[bad' } });
+
+  assert.equal(scraped.listing_url, MINIMAL.url);
 });
