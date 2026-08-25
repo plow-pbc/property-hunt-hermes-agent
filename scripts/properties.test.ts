@@ -52,12 +52,10 @@ test('the data folder honours an explicit override', () => {
   assert.equal(resolveDataDir({ PROPERTY_HUNT_DIR: '/tmp/somewhere' } as NodeJS.ProcessEnv), '/tmp/somewhere');
 });
 
-test('a Mac with no agent mount falls back to the Plow folder', () => {
-  const resolved = resolveDataDir({} as NodeJS.ProcessEnv);
-  assert.ok(
-    resolved === path.join(os.homedir(), 'Plow', 'properties') || resolved === '/workspace/host/properties',
-    `unexpected default ${resolved}`,
-  );
+test('the default folder is the one the user opens in Finder', () => {
+  // One answer now, not two: the scripts run on the Mac under latch, so there
+  // is no agent-VM mount to prefer and no reason to accept either result.
+  assert.equal(resolveDataDir({} as NodeJS.ProcessEnv), path.join(os.homedir(), 'Plow', 'properties'));
 });
 
 test('init scaffolds a folder the frontend can actually load', () => {

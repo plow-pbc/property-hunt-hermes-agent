@@ -37,10 +37,9 @@ for (const doc of ['SKILL.md', 'README.md']) {
   }
 }
 
-// The map page is shipped to users (install-local.ts excludes only .git and
-// docs), so a command printed in its UI is as user-facing as one in SKILL.md —
-// and it was the one surface still carrying a live violation while the scan
-// looked elsewhere.
+// The map page is shipped to users, so a command printed in its UI is as
+// user-facing as one in SKILL.md — and it was the one surface still carrying a
+// live violation while the scan looked elsewhere.
 SOURCES.push({
   name: 'references/frontend/index.html',
   text: fs.readFileSync(path.join(BUNDLE, 'references', 'frontend', 'index.html'), 'utf8'),
