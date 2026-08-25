@@ -16,6 +16,18 @@ export type Fetch = { url: string; resolve: string; path: string };
 
 export type Envelope = {
   store?: string;
+  /**
+   * What to write when a `fetch` fails. Present only alongside one.
+   *
+   * The transform cannot know whether the agent's curl will succeed, and the
+   * store is written before it runs — so without this a hotlink-blocking CDN
+   * or a 302 (which --max-redirs 0 refuses) leaves a record pointing at a file
+   * that never arrived. The map renders that as a broken image, which is the
+   * outcome keepPreviousEnrichment exists to avoid, and it is unrecoverable:
+   * on the next refresh the photo field is non-null, so the carry-forward
+   * branch never fires and nothing ever nulls it.
+   */
+  store_without_photo?: string;
   fetch?: Fetch;
   remove?: string[];
   id?: string;

@@ -360,9 +360,20 @@ async function main(): Promise<void> {
   }
 
   const next = upsertScraped(before, scraped);
+
+  // The alternative store, for when the agent's fetch fails. Built from the
+  // same row with the photo nulled, so the caller never has to choose between
+  // losing the listing and keeping a pin that points at nothing.
+  let withoutPhoto: string | undefined;
+  if (fetch) {
+    const fallback = upsertScraped(before, { ...scraped, photo: null });
+    withoutPhoto = serializeStore(fallback);
+  }
+
   process.stdout.write(
     envelope({
       store: serializeStore(next),
+      ...(withoutPhoto ? { store_without_photo: withoutPhoto } : {}),
       ...(fetch ? { fetch } : {}),
       id,
       verb: next.length > before.length ? 'added' : 'refreshed',

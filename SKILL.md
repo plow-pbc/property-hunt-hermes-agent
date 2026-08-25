@@ -128,13 +128,7 @@ Add `--photo-on-disk` when you are refreshing a property whose photo file is
 already on the Mac. Leaving it off costs a re-fetch; claiming it wrongly leaves
 a pin pointing at nothing.
 
-**7. Write the store back.**
-
-```json
-{ "tool": "plow_write_file", "path": "/Users/<user>/Plow/properties/data.js", "content": "<the envelope's store value>" }
-```
-
-**8. Fetch the photo, if the envelope carried a `fetch`.**
+**7. Fetch the photo first, if the envelope carried a `fetch`.**
 
 ```json
 {
@@ -151,6 +145,24 @@ the address that was already vetted, so DNS cannot swing to a private one
 between the check and the fetch. `--max-redirs 0` refuses hops nobody vetted —
 the transform already followed them and gave you the final URL. Dropping either
 turns the map into a probe of the user's own network.
+
+**8. Write the store that matches what happened.**
+
+| the fetch | write |
+|---|---|
+| succeeded, or there was no `fetch` | `store` |
+| failed | `store_without_photo` |
+
+```json
+{ "tool": "plow_write_file", "path": "/Users/<user>/Plow/properties/data.js", "content": "<the one you chose>" }
+```
+
+Fetching before writing is deliberate. `store` names the photo file, so writing
+it after a failed fetch leaves a record pointing at nothing — the map draws
+that as a broken image, and no later refresh clears it, because the photo field
+is no longer null and the carry-forward never fires. `store_without_photo` is
+the same listing with an honest empty photo; a plain marker beats a broken one,
+and the next refresh will try the photo again.
 
 **9. Tell the user what you saved** — one line: address, price, beds/baths/sqft.
 

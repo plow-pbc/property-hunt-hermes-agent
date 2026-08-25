@@ -412,3 +412,27 @@ test('a photo on a non-public address never becomes a directive', async () => {
     );
   }
 });
+
+test('a fetch directive comes with the store to write if the fetch fails', () => {
+  // The store is written before the agent runs curl, so a hotlink-blocking CDN
+  // or a 302 that --max-redirs 0 refuses would otherwise leave a record
+  // pointing at a file that never arrived — a broken image on the map, and one
+  // no later refresh can clear, because the photo field is non-null so the
+  // carry-forward branch never fires.
+  const env = JSON.parse(harvest({ jsonld: [JSON.stringify(RESIDENCE)], og: FULL_OG, settled: true }).out);
+
+  assert.ok(env.fetch, 'this fixture has a hero image');
+  assert.equal(loadStore(env.store)[0].scraped.photo, 'photos/424-28th-st-94131-ca.jpg');
+  assert.ok(env.store_without_photo, 'and the honest alternative');
+  assert.equal(loadStore(env.store_without_photo)[0].scraped.photo, null);
+  // Same listing either way — only the photo differs.
+  assert.equal(loadStore(env.store_without_photo)[0].scraped.address, '424 28th St');
+});
+
+test('no fetch means no alternative store to choose between', () => {
+  const env = JSON.parse(
+    harvest({ jsonld: [JSON.stringify(RESIDENCE)], og: { ...FULL_OG, 'og:image': 'http://127.0.0.1/x.jpg' }, settled: true }).out,
+  );
+  assert.equal(env.fetch, undefined);
+  assert.equal(env.store_without_photo, undefined);
+});
