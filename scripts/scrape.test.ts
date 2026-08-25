@@ -391,3 +391,24 @@ test('a photo that cannot be fetched costs the pin its picture, and says so', ()
   assert.equal(saved[0].scraped.photo, null, 'an honest empty photo, not a broken path');
   assert.equal(saved[0].scraped.address, '424 28th St');
 });
+
+test('a listing linking somewhere that is not the web still lands, on the page url', () => {
+  // mailto: and javascript: parse, so a loop that accepted anything parseable
+  // took them and then failed the record at coerceScraped — with the page URL,
+  // already validated as http(s), sitting one candidate away. Asserted
+  // end-to-end because the unit boundary is exactly where that hole hid: the
+  // extract-level test passed while the save was discarded.
+  for (const url of ['mailto:agent@example.com', 'javascript:void(0)']) {
+    const dir = initStore();
+    const out = harvestInto(dir, {
+      jsonld: [JSON.stringify({ ...RESIDENCE, url })],
+      og: FULL_OG,
+      settled: true,
+    });
+
+    assert.match(out, /^added /, `saved despite a ${url} canonical link`);
+    const saved = JSON.parse(fs.readFileSync(path.join(dir, 'data.js'), 'utf8').split('=')[1]);
+    assert.equal(saved[0].scraped.listing_url, URL_, 'fell back to the page it was read from');
+    assert.equal(saved[0].scraped.listing_source, 'compass.com', 'so the source label still derives');
+  }
+});

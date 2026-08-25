@@ -216,7 +216,13 @@ export function extractScraped(page: PageSurfaces, now: string = new Date().toIS
   ]) {
     if (!candidate) continue;
     try {
-      listingUrl = new URL(candidate, page.url).href;
+      const resolved = new URL(candidate, page.url);
+      // Parsing is not the bar — the store's is. `mailto:` and
+      // `javascript:void(0)` parse perfectly well, so accepting the first
+      // thing that PARSED took a page's own bad link and then failed the
+      // record on it downstream, with page.url one candidate away unused.
+      if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:') continue;
+      listingUrl = resolved.href;
       break;
     } catch {
       // Next candidate.
