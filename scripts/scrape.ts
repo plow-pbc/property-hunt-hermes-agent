@@ -112,12 +112,18 @@ export function parseHarvest(raw: string, url: string): { page: PageSurfaces; se
  * raise the identical message.
  */
 function reportHarvestFailure(url: string, settled: boolean, problem: string): void {
-  const missingField = /is required|could not find an address|no usable characters/.test(problem);
-  if (settled && missingField) {
+  if (settled) {
+    // `settled` alone decides this. Gating on the error text as well sent a
+    // settled page that failed for any OTHER reason back for two more evals of
+    // a byte-identical payload — a malformed og:image raises "Invalid URL",
+    // which no missing-field pattern matches. The text only picks the wording.
+    const missingField = /is required|could not find an address|no usable characters/.test(problem);
     toolError(
-      `read ${url}, but it does not publish a saveable listing. Last problem: ${problem}. ` +
-        'If the page genuinely does not publish that field, try this property on another ' +
-        'listing site — do not supply a value of your own.',
+      `read ${url}, but it does not publish a saveable listing. Last problem: ${problem}.` +
+        (missingField
+          ? ' If the page genuinely does not publish that field, try this property on another' +
+            ' listing site — do not supply a value of your own.'
+          : ''),
     );
     return;
   }

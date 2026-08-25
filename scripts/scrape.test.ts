@@ -260,6 +260,19 @@ test('whether a failure is worth retrying is decided by how the poll exited', ()
       says: /could not find an address/,
     },
     {
+      // Settled, and the failure is not a missing field at all: a malformed
+      // og:image raises "Invalid URL" out of extractScraped. Polling again
+      // returns the identical payload, so this must not read as retryable.
+      name: 'settled, failing for a reason no missing-field pattern matches',
+      payload: {
+        jsonld: [JSON.stringify(RESIDENCE)],
+        og: { ...FULL_OG, 'og:image': 'http://[[[bad' },
+        settled: true,
+      },
+      retryable: false,
+      says: /Invalid URL/,
+    },
+    {
       name: 'both surfaces settled and still no address',
       payload: {
         jsonld: [],
@@ -324,7 +337,13 @@ test('the harvest expression actually runs, and reports which exit it took', asy
   const run = (doc: unknown) => {
     let clock = 0;
     const clockedDate = { now: () => clock };
+    let ticks = 0;
     const instantly = (fn: () => void, ms: number) => {
+      // Bounded on purpose. The interval is the only thing moving this clock
+      // toward the deadline, so dropping it to 0 would spin here forever —
+      // and node:test has no default per-test timeout, so the suite would hang
+      // rather than fail. Fail loudly instead.
+      if ((ticks += 1) > 100) throw new Error('harvest expression did not reach its deadline in 100 polls');
       clock += ms;
       fn();
     };
