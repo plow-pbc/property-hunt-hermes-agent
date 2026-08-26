@@ -36,9 +36,9 @@ def dotenv(path):
              if l and not l.startswith("#")]
     for l in lines:
         # Loud, not skipped. An `"=" in l` filter here would drop a bare
-        # `sk-...` line silently -- and agent.env is exempted from the
-        # credential guard on the strength of a test that reads through this,
-        # so a line this reader cannot see is a line nothing checks.
+        # `sk-...` line silently, and every assertion this file makes about a
+        # dotenv reads through here -- so a line this reader cannot see is a
+        # line nothing in this suite checks.
         assert "=" in l, f"{path.name}: not a KEY=VALUE line: {l!r}"
     return lines
 
@@ -102,7 +102,13 @@ def test_latch_is_configured_from_the_environment_not_from_git():
 
 
 def test_the_dotenv_example_carries_no_values():
-    """The exemption above rests on this: it is a shape, not a secret store."""
+    """The likeliest leak in this repo, and the one .gitignore structurally cannot stop.
+
+    `.env.example` is tracked on purpose -- it is the contract for what the
+    agent's home dotenv must hold -- so filling it in and committing is a
+    credential in git with nothing in the way. Asserted as a shape: keys, and
+    no values.
+    """
     keys = dotenv(ROOT / ".env.example")
     assert keys, ".env.example declares no keys -- is it still the skeleton?"
     for line in keys:
@@ -163,3 +169,25 @@ def test_the_deployment_half_stays_out_of_the_mount():
     for outside in ("agent.env", "config.yaml", ".env.example", "compose.override.yml", "tests"):
         assert (ROOT / outside).exists(), f"{outside} moved -- is it inside the mount now?"
         assert not (ROOT / "skill" / outside).exists(), f"{outside} is inside the mounted tree"
+
+
+def test_nothing_credential_shaped_sits_inside_the_mount():
+    """The other half: not just that five named files are out, but that no sixth is in.
+
+    A claim about one known directory, which is why it needs no exemption list
+    -- agent.env and .env.example live at the root by construction. Walked on
+    the filesystem rather than through git, because the mount is the boundary
+    and an untracked file is handed to the container just the same.
+
+    .gitignore lists the exact name `.env`, so skill/prod.env, skill/.env.local
+    and skill/latch-auth.json are all committable today and would all be
+    readable by an agent that ingests texted screenshots and pasted listing
+    URLs while holding the Latch relay credential.
+    """
+    offenders = [
+        str(f.relative_to(ROOT))
+        for f in (ROOT / "skill").rglob("*")
+        if f.is_file()
+        and (f.name.endswith(".env") or f.name.startswith(".env") or f.name in {"auth.json", "auth.lock"})
+    ]
+    assert not offenders, f"credential-shaped files inside the mounted tree: {offenders}"
