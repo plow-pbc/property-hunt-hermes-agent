@@ -188,6 +188,7 @@ def test_nothing_credential_shaped_sits_inside_the_mount():
         str(f.relative_to(ROOT))
         for f in (ROOT / "skill").rglob("*")
         if f.is_file()
-        and (f.name.endswith(".env") or f.name.startswith(".env") or f.name in {"auth.json", "auth.lock"})
+        and (f.name.endswith(".env") or f.name.startswith(".env")
+             or f.name.endswith("auth.json") or f.name.endswith("auth.lock"))
     ]
     assert not offenders, f"credential-shaped files inside the mounted tree: {offenders}"
