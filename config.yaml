@@ -1,0 +1,30 @@
+# The declarative half of ~/.hermes-property — everything that is a deliberate
+# choice for this deployment. Keys equal to the image's own defaults are
+# deliberately absent, so the pinned image supplies its current defaults rather
+# than a frozen snapshot of them.
+model:
+  default: gpt-5.5
+  provider: openai-codex
+mcp_servers:
+  # Plow Latch, reached over the Plow relay. This is the whole point of this
+  # agent: the browser and the filesystem it works on are the operator's Mac,
+  # not this container. The relay authorises the connection and tells the Mac
+  # who is asking; the Mac authorises each action.
+  #
+  # Same shape the rentals agent uses for Hostex: a URL and a bearer header,
+  # both from the dotenv. The credential never appears in the URL.
+  latch:
+    url: https://api.plow.co/v1/relay/devices/${DOMO_DEVICE_UID}/mcp
+    headers:
+      Authorization: Bearer ${DOMO_MCP_TOKEN}
+    enabled: true
+plugins:
+  enabled:
+  - plow-chat-platform
+platforms:
+  plow_chat:
+    enabled: true
+    # No extra.group_prompts: this agent has one private chat and no groups.
+    # The plugin keys group prompts by display name from PLOW_CHAT_GROUP_UIDS,
+    # and a prompt naming no configured group is logged and skipped rather than
+    # fatal — so adding one here before the group exists is a silent no-op.
