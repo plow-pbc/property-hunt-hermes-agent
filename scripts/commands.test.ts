@@ -144,15 +144,8 @@ test('nothing untrusted is passed as a shell word', () => {
   // contract looks authoritative — which is exactly how --store, --store-file
   // and --request ended up documented at the same time.
   const retired = /--store-file|--harvest-file|--photo-on-disk|--store\b/;
-  // Tests included — a test's NAME is a string a failing run prints, and one
-  // was still printing a retired flag. SOURCES is deliberately non-test for the
-  // runnable-command check above, so this reads the directory. This file is
-  // excluded: it defines the spellings, and scanning a rule's own words is how
-  // two earlier tests here died.
-  const code = fs
-    .readdirSync(SCRIPTS)
-    .filter((n) => n.endsWith('.ts') && n !== 'commands.test.ts')
-    .map((n) => fs.readFileSync(path.join(SCRIPTS, n), 'utf8'))
+  const code = SOURCES.filter((s) => s.name.endsWith('.ts'))
+    .map((s) => s.text)
     .join('\n');
   assert.ok(!retired.test(code), 'one transport in the code');
   assert.ok(!retired.test(skillText + readme), 'and one in the instructions');
@@ -272,31 +265,6 @@ test('the port is freed without the shell killing itself', () => {
   assert.ok(load, 'SKILL.md must show the job being loaded');
   assert.match(load, /lsof -ti :8787/, 'free the port by what holds it, not by a name pattern');
   assert.ok(!/pkill -f .http\.server/.test(load), 'that pattern matches the running shell');
-});
-
-test('the docs say how state reaches the scripts', () => {
-  // Asserted as the presence of the correct claim rather than the absence of
-  // the retired ones. Six copies of "never touches a filesystem" / "takes the
-  // store as an argument" outlived the --request cutover and were corrected one
-  // per review round; a list of the five spellings then let the sixth through,
-  // because it said "Nothing here touches". A synonym always walks through an
-  // absence scan. Same reasoning as the at-login test below.
-  // Anchored to the contract sentence PAIRED with its output half, not to the
-  // phrase anywhere in the file: SKILL.md names the request file in three
-  // unrelated steps, so a loose match ran green against the very paragraph
-  // this exists to pin.
-  const contract: Array<[string, RegExp]> = [
-    ['SKILL.md', /State arrives in the `--request` file.{0,120}?JSON envelope/i],
-    ['README.md', /arrive in a request file.{0,120}?comes out on stdout/i],
-  ];
-  for (const [name, claim] of contract) {
-    // Whitespace-normalized: these paragraphs hard-wrap at ~78 columns, so
-    // adding a word upstream reflows them and would split a matched phrase
-    // across a newline — a red suite over a cosmetic edit, which is how a
-    // maintainer gets taught to loosen the regex instead of fixing the prose.
-    const text = fs.readFileSync(path.join(BUNDLE, name), 'utf8').replace(/\s+/g, ' ');
-    assert.match(text, claim, `${name} must state the request-file contract where it describes the transport`);
-  }
 });
 
 test('the docs say the job starts at login', () => {

@@ -28,7 +28,8 @@ itself, one download of that listing's photo from whatever host it lives on,
 one [Nominatim](https://nominatim.org) geocoding request per property to turn
 its address into a pin, and [OpenStreetMap](https://www.openstreetmap.org/copyright)
 map tiles fetched while you have the map open. Your notes and ratings go to none
-of them.
+of them — but serving the map to your phone sends the whole store, notes and
+ratings included, to whichever tailnet device opens it.
 
 ## Requirements
 
