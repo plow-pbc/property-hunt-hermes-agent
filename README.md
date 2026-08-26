@@ -51,6 +51,71 @@ nothing here can fall out of step with the agent.
 [howto.plow.co/property-hunt](https://howto.plow.co/property-hunt) is the
 install guide.
 
+## Running it
+
+This repo is the whole agent: the skill *and* the deployment that carries it.
+`agent-mgr` supplies everything true of every Hermes agent; nothing here names
+which person it serves, so a second operator registers their own row against
+their own checkout and gets their own home, container and project.
+
+You need [`agent-mgr`](https://github.com/plow-pbc/agent-mgr), a Docker daemon,
+`gh` authenticated (`gh auth status` — `restore` fetches the Plow Chat plugin
+through it), and a Mac running Plow Latch.
+
+```sh
+git clone https://github.com/plow-pbc/property-hunt-hermes-agent.git ~/services/property-hunt-hermes-agent
+agent-mgr register property ~/services/property-hunt-hermes-agent   # this path is what gets mounted
+agent-mgr restore  property   # config, the Plow Chat plugin, and an empty dotenv
+
+# Now fill ~/.hermes-property/.env with DOMO_DEVICE_UID and DOMO_MCP_TOKEN,
+# minted from the Mac running Latch — see .env.example for how. `restore` only
+# lays down the empty skeleton and never overwrites it, and config.yaml reads
+# both as ${VAR} at runtime, so an unfilled pair authenticates as nothing
+# rather than failing loudly.
+
+agent-mgr activate   property   # prints a code to text; consumes a line from the Plow pool
+agent-mgr up         property   # must precede sign-in: that runs inside this container
+agent-mgr check-latch property  # asks the relay, from inside the container, whether the pair works
+agent-mgr sign-in    property   # one-time browser OAuth for this agent
+agent-mgr agent      property 'which houses have I saved?'   # a turn without the phone
+```
+
+Register the checkout itself: the override mounts whatever directory that row
+names, so a wrong path is how the container ends up with no `scripts/`.
+
+**Your credentials never live here.** They live in `~/.hermes-property/.env`,
+outside this repo — which matters more than usual, because this whole checkout
+is mounted into the agent's container. A stray `.env` beside these files would
+be mounted with them. `.gitignore` stops it reaching git; nothing stops it
+reaching the container.
+
+### Deploying a change
+
+```sh
+cd ~/services/property-hunt-hermes-agent && git pull
+agent-mgr restore property && agent-mgr up property
+```
+
+One recipe for every file here, deliberately. Only `scripts/` and
+`references/` are genuinely live — the agent execs those out of the mount each
+turn. Everything else is read once and held: `SKILL.md` and `config.yaml` at
+gateway start, `agent.env` and `compose.override.yml` when Compose renders. A
+`git pull` alone leaves a running agent on the old values with no error, and
+which files that applies to is not worth remembering when the full recipe costs
+a few seconds.
+
+**What the agent is running is the working tree, not `HEAD`.** A bind mount
+serves what is on disk, so a dirty or mid-pull deploy clone serves that, while
+`git rev-parse HEAD` reports something else. Keep `~/services/property-hunt-hermes-agent`
+clean and on `main`; to check what is actually live:
+
+```sh
+git -C ~/services/property-hunt-hermes-agent status --porcelain   # must be empty
+git -C ~/services/property-hunt-hermes-agent rev-parse HEAD
+```
+
+`agent.env` declares nothing on purpose — see the comments in it.
+
 ## Your data
 
 Everything lives in `~/Plow/properties/`:
