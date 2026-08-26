@@ -141,3 +141,41 @@ def test_the_shipped_config_names_its_secrets_by_variable():
     for line in text.splitlines():
         if "Authorization" in line or "token" in line.lower():
             assert "${" in line, f"a literal credential in config.yaml: {line.strip()}"
+
+
+def test_the_override_adds_exactly_one_read_only_skill_mount():
+    """The skill is mounted from this checkout, not fetched into the home.
+
+    It used to be pinned by SHA and pulled from a second repo, and that is what
+    made a half-delivery possible: the installer fetched SKILL.md alone and
+    dropped the nested scripts/ and references/ the instructions call, so every
+    transform failed with "Cannot find module" while reads kept working. One
+    repo, one checkout, no pin to drift.
+
+    Constrained rather than merely present, because agent-mgr asserts its
+    TEMPLATE's volume set and nothing asserts an instance's -- its own fixture
+    shows an override merging in a vault directory. The override lives here, so
+    this is the file that can check it.
+    """
+    mounts = yaml.safe_load(
+        (ROOT / "compose.override.yml").read_text()
+    )["services"]["hermes"]["volumes"]
+    assert len(mounts) == 1, f"the override widens the mount set by more than the skill: {mounts}"
+    # rsplit, not split: the source is ${AGENT_DIR:?...}, whose :? default
+    # syntax carries colons of its own.
+    source, target, mode = mounts[0].rsplit(":", 2)
+    # ${AGENT_DIR}, never a relative path: agent-mgr passes its own
+    # templates/compose.yml as the FIRST -f, and Compose resolves relative bind
+    # paths against that file's directory -- so "./" here mounts agent-mgr.
+    assert source.startswith("${AGENT_DIR"), source
+    assert target == "/opt/data/skills/productivity/property-hunt", target
+    assert mode == "ro", "the agent runs these, it does not edit them"
+
+
+def test_the_mounted_tree_carries_what_the_instructions_call():
+    """SKILL.md's commands are relative to the skill directory, which is this repo."""
+    skill = (ROOT / "SKILL.md").read_text()
+    assert "scripts/properties.ts" in skill and "scripts/scrape.ts" in skill
+    for needed in ("scripts/properties.ts", "scripts/scrape.ts", "references"):
+        assert (ROOT / needed).exists(), f"the mount would carry no {needed}"
+

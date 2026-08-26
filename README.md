@@ -42,9 +42,9 @@ A Mac running [Plow Latch](https://github.com/plow-pbc/latch), and a Hermes
 agent you can text.
 
 **The Mac holds only Latch and your data.** These scripts run in the agent's
-container, from a pinned checkout, and own no state: the store and the harvest
-payload arrive in a request file the agent writes, and the new store comes out
-on stdout. The agent reads `data.js` off the Mac through Latch, runs the
+container, out of this repo's own checkout, and own no state: the store and
+the harvest payload arrive in a request file the agent writes, and the new
+store comes out on stdout. The agent reads `data.js` off the Mac through Latch, runs the
 transform, and writes the result back. Nothing here is installed on the Mac, so
 nothing here can fall out of step with the agent.
 

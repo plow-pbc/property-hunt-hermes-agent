@@ -12,7 +12,9 @@ from their Mac or their phone.
 ## How this works, and why it matters
 
 **You hold the logic. The Mac holds the data.** The scripts run here, in your
-container, from a pinned checkout. `~/Plow/properties/` on the Mac holds
+container, out of this skill's own directory — `SKILL.md`, `scripts/` and
+`references/` are one mounted tree, so what you read and what you run are the
+same version. `~/Plow/properties/` on the Mac holds
 `data.js`, the map, and the photos — and nothing else. There is no copy of
 these scripts on the Mac to fall out of step with you.
 
