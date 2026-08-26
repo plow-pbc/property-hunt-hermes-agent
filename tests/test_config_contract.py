@@ -151,6 +151,18 @@ def test_the_override_adds_exactly_one_read_only_skill_mount():
     assert target == "/opt/data/skills/productivity/property-hunt", target
     assert mode == "ro", "the agent runs these, it does not edit them"
 
+    # And the runbook has to name the same boundary. This moved twice in one
+    # branch -- whole checkout, then skill/ -- and the README described the old
+    # one both times, telling operators a stray root .env reached the container
+    # after it no longer did. Pinned by VALUE, the way SKILL.md is pinned to
+    # HARVEST_EXPRESSION: a scan for sentences about mounting gets out-spelled
+    # the first time someone rephrases; a literal that must appear cannot.
+    subpath = source.split("}", 1)[1]
+    readme = (ROOT / "README.md").read_text()
+    assert f"${{AGENT_DIR}}{subpath}" in readme, (
+        f"the override mounts ${{AGENT_DIR}}{subpath}; the README does not say so"
+    )
+
 
 def test_the_mounted_tree_carries_what_the_instructions_call():
     """SKILL.md's commands are relative to the skill directory, which is skill/."""
@@ -172,31 +184,3 @@ def test_the_deployment_half_stays_out_of_the_mount():
     for outside in ("agent.env", "config.yaml", ".env.example", "compose.override.yml", "tests"):
         assert (ROOT / outside).exists(), f"{outside} moved -- is it inside the mount now?"
         assert not (ROOT / "skill" / outside).exists(), f"{outside} is inside the mounted tree"
-
-
-def test_the_readme_names_the_mount_the_override_actually_makes():
-    """The runbook and the override have to agree on where the boundary is.
-
-    This moved twice in one branch -- whole checkout, then skill/ -- and the
-    README described the old one both times, telling operators a stray root
-    .env reached the container when it no longer did. That is worse than
-    silence: it is a credential-exposure model that is wrong in the reassuring
-    direction.
-
-    Pinned by VALUE, not by prose: the mount source is read out of the override
-    and asserted to appear in the README verbatim, the same way SKILL.md is
-    pinned to HARVEST_EXPRESSION. A scan for sentences about mounting would be
-    out-spelled the first time someone rephrased it.
-    """
-    mount = yaml.safe_load(
-        (ROOT / "compose.override.yml").read_text()
-    )["services"]["hermes"]["volumes"][0]
-    source, target, _ = mount.rsplit(":", 2)
-    # ${AGENT_DIR:?...} carries its own default text; the README names the
-    # bare variable and the subdirectory, which is the part an operator acts on.
-    subpath = source.split("}", 1)[1]
-    readme = (ROOT / "README.md").read_text()
-    assert f"${{AGENT_DIR}}{subpath}" in readme, (
-        f"the override mounts ${{AGENT_DIR}}{subpath}; the README does not say so"
-    )
-    assert target.rsplit("/", 1)[-1] in readme
