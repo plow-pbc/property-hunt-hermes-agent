@@ -23,13 +23,17 @@ No server. No API key. No account. No build step. Open the HTML file from Finder
 and it works — the map is [Leaflet](https://leafletjs.com), bundled, and your
 data is a plain JSON file the page loads directly.
 
-Four things go out to the public internet, and nothing else: the listing lookup
-itself, one download of that listing's photo from whatever host it lives on,
-one [Nominatim](https://nominatim.org) geocoding request per property to turn
-its address into a pin, and [OpenStreetMap](https://www.openstreetmap.org/copyright)
-map tiles fetched while you have the map open. Your notes and ratings go to none
-of them — but serving the map to your phone sends the whole store, notes and
-ratings included, to whichever tailnet device opens it.
+Four things go out to strangers, and nothing else: the listing lookup itself,
+one download of that listing's photo from whatever host it lives on, one
+[Nominatim](https://nominatim.org) geocoding request per property to turn its
+address into a pin, and [OpenStreetMap](https://www.openstreetmap.org/copyright)
+map tiles fetched while you have the map open. Your notes and ratings go to
+none of those.
+
+They do travel, though, and it is worth knowing where. Editing a property sends
+the whole store — notes and ratings included — across the Plow relay in both
+directions, because that is how the agent reaches the Mac. Serving the map to
+your phone sends it to whichever tailnet device opens it.
 
 ## Requirements
 
