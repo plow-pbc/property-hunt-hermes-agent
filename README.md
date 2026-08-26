@@ -30,10 +30,11 @@ address into a pin, and [OpenStreetMap](https://www.openstreetmap.org/copyright)
 map tiles fetched while you have the map open. Your notes and ratings go to
 none of those.
 
-They do travel, though, and it is worth knowing where. Editing a property sends
-the whole store — notes and ratings included — across the Plow relay in both
-directions, because that is how the agent reaches the Mac. Serving the map to
-your phone sends it to whichever tailnet device opens it.
+They do travel, though, and it is worth knowing where. Anything you ask about a
+property sends the whole store — notes and ratings included — across the Plow
+relay, because that is how the agent reaches the Mac; an edit sends it back the
+same way. Serving the map to your phone sends it to whichever tailnet device
+opens it.
 
 ## Requirements
 
@@ -84,7 +85,8 @@ just test
 The transforms take their state as text, so a test can build a store inline; the
 CLI tests write it to a request file the way the agent does. A contract test
 fails the suite if a script imports `node:fs` at all: one line in
-`properties.ts` reads the request file, and that is the only fs call here.
+`properties.ts` reads the request file, and no other script imports it — the
+tests do, to stage that file.
 
 ## License
 
