@@ -131,7 +131,15 @@ test('nothing untrusted is passed as a shell word', () => {
   const scrape = fs.readFileSync(path.join(SCRIPTS, 'scrape.ts'), 'utf8');
   assert.match(props, /--request/);
   assert.match(scrape, /takeRequest/);
-  assert.ok(!/--store-file|--harvest-file/.test(props + scrape), 'one transport, not three');
+  const skillText = fs.readFileSync(path.join(BUNDLE, 'SKILL.md'), 'utf8');
+  const readme = fs.readFileSync(path.join(BUNDLE, 'README.md'), 'utf8');
+  // The instructions too, not just the code. A retired flag left in prose is
+  // worse than a wrong one, because the agent follows it and each surviving
+  // contract looks authoritative — which is exactly how --store, --store-file
+  // and --request ended up documented at the same time.
+  const retired = /--store-file|--harvest-file|--photo-on-disk|--store\b/;
+  assert.ok(!retired.test(props + scrape), 'one transport in the code');
+  assert.ok(!retired.test(skillText + readme), 'and one in the instructions');
 
   const skill = fs.readFileSync(path.join(BUNDLE, 'SKILL.md'), 'utf8');
   for (const fence of skill.matchAll(/```sh\n([\s\S]*?)```/g)) {

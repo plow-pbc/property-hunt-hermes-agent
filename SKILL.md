@@ -151,9 +151,6 @@ command syntax in your own container. The URL cannot be validated first
 either: by then the shell has already parsed it. A path you chose is the only
 value here that is yours.
 
-Set `photoOnDisk` to `true` only when refreshing a property whose photo file is
-already on the Mac.
-
 Set `"photoOnDisk": true` in the request when refreshing a property whose photo
 file is already on the Mac. It does two things: the record can carry the old
 photo forward if this scrape finds none, and `store_without_photo` keeps that
@@ -207,9 +204,10 @@ does the photo become `null`.
 Fetching before writing is deliberate. `store` names the photo file, so writing
 it after a failed fetch leaves a record pointing at nothing — the map draws
 that as a broken image, and no later refresh clears it, because the photo field
-is no longer null and the carry-forward never fires. `store_without_photo` is
-the same listing with an honest empty photo; a plain marker beats a broken one,
-and the next refresh will try the photo again.
+is no longer null and the carry-forward never fires. `store_without_photo` is the
+same listing with whatever photo is honestly there — the prior pin when
+`photoOnDisk` said it survives, nothing when it does not. A plain marker beats
+a broken one, and the next refresh tries again.
 
 **9. Tell the user what you saved** — one line: address, price, beds/baths/sqft.
 
