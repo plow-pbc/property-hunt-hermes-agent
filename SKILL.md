@@ -23,8 +23,8 @@ So every change to the store is three moves:
    `--request` file
 3. **Write** the result back with `plow_write_file`
 
-The scripts never touch a filesystem. They take the store as an argument and
-print a JSON envelope saying what should replace it:
+The scripts never write a file. State arrives in the `--request` file you wrote
+above, and they print a JSON envelope saying what should replace the store:
 
 ```json
 { "store": "…", "fetch": {…}, "remove": ["…"], "id": "…", "verb": "added", "notes": ["…"] }

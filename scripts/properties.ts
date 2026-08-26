@@ -1,6 +1,8 @@
 #!/usr/bin/env node
-// The store CLI, as a pure transform. Every command takes the store's text and
-// prints what should replace it; nothing here reads or writes a file.
+// The store CLI. Every command takes the store's text and prints what should
+// replace it; nothing here writes a file. The store arrives in the request file
+// the agent wrote — a shell-quoted one would let an apostrophe in a listing
+// become command syntax.
 //
 // The store lives on the operator's Mac and this runs in the agent's container,
 // so the agent is the transport: it reads data.js through Latch, runs one of

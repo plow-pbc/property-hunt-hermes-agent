@@ -27,8 +27,8 @@ Four things do go out over the network, and nothing else: the listing lookup
 itself, one download of that listing's photo from whatever host it lives on,
 one [Nominatim](https://nominatim.org) geocoding request per property to turn
 its address into a pin, and [OpenStreetMap](https://www.openstreetmap.org/copyright)
-map tiles fetched while you have the map open. Your notes and ratings never
-leave your Mac.
+map tiles fetched while you have the map open. Your notes and ratings go to none
+of them.
 
 ## Requirements
 
@@ -36,11 +36,11 @@ A Mac running [Plow Latch](https://github.com/plow-pbc/latch), and a Hermes
 agent you can text.
 
 **The Mac holds only Latch and your data.** These scripts run in the agent's
-container, from a pinned checkout, and never touch a filesystem: the store goes
-in as an argument and the new one comes out on stdout. The agent reads
-`data.js` off the Mac through Latch, runs the transform, and writes the result
-back. Nothing here is installed on the Mac, so nothing here can fall out of
-step with the agent.
+container, from a pinned checkout, and own no state: the store and the harvest
+payload arrive in a request file the agent writes, and the new store comes out
+on stdout. The agent reads `data.js` off the Mac through Latch, runs the
+transform, and writes the result back. Nothing here is installed on the Mac, so
+nothing here can fall out of step with the agent.
 
 [howto.plow.co/property-hunt](https://howto.plow.co/property-hunt) is the
 install guide.
@@ -76,8 +76,10 @@ No dependencies and no build — Node 24 runs the TypeScript directly:
 just test
 ```
 
-Every script is a pure transform, so the tests need no filesystem and no
-fixtures on disk. A contract test fails the suite if one grows an `fs` call.
+The transforms take their state as text, so a test can build a store inline; the
+CLI tests write it to a request file the way the agent does. A contract test
+fails the suite if a script writes, stats, or lists a directory — reading the
+request file is how state arrives.
 
 ## License
 

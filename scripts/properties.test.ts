@@ -119,7 +119,7 @@ test('a note survives the request file exactly as typed', () => {
   }
 });
 
-test('a blank --store is refused rather than read as an empty store', () => {
+test('a blank store is refused rather than read as an empty store', () => {
   const { err, code } = run({ verb: 'list', store: '' });
   assert.notEqual(code, 0);
   assert.match(err, /empty/i);

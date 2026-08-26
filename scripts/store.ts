@@ -3,8 +3,8 @@
 // derived export that can silently go stale.
 //
 // This module owns the store's SHAPE, not its storage. It parses text and
-// serializes rows; the agent does the reading and writing, on the operator's
-// Mac, through Latch. Nothing here touches a filesystem.
+// serializes rows; the agent does the reading and writing of `data.js`, on the
+// operator's Mac, through Latch.
 
 /** Scraped from a listing. Replaced wholesale on every re-scrape. */
 export type Scraped = {
@@ -179,8 +179,9 @@ export function parseStore(text: string): Property[] {
  * The one way to read the store, and the one place that says what to do when
  * the text is not one.
  *
- * There is no filesystem here any more. The agent reads data.js off the Mac
- * and passes the contents in; `serializeStore` returns the text to write back.
+ * Nothing here reaches for state. The agent writes what it read off the Mac
+ * into the request file, the caller passes those contents in, and
+ * `serializeStore` returns the text to write back.
  * That removes the second copy of this code that used to sit on the Mac and
  * drift from the pinned one — which it did, within a week.
  *

@@ -109,7 +109,11 @@ test('no script reaches the store or the photos', () => {
   // both can contain any byte a listing page cares to emit and a shell-quoted
   // argument would let an apostrophe become command syntax. Receiving state
   // through a path is still receiving it.
-  const forbidden = /\bfs\.(write|append|mkdir|rm|unlink|rename|exists|stat|readdir|copy|open)\w*/;
+  // Pinned at the IMPORT, not the call site: a scan for write verbs can always
+  // be out-spelled — namespaced, bare, aliased, sync, async. Exactly one fs
+  // import here is legitimate, so name it and reject every other. You cannot
+  // call what you did not import.
+  const allowed = "import { readFileSync } from 'node:fs';";
   const offenders: string[] = [];
   for (const name of fs.readdirSync(SCRIPTS).filter((n) => n.endsWith('.ts') && !n.endsWith('.test.ts'))) {
     fs.readFileSync(path.join(SCRIPTS, name), 'utf8')
@@ -117,7 +121,9 @@ test('no script reaches the store or the photos', () => {
       .forEach((line, i) => {
         const t = line.trim();
         if (t.startsWith('//') || t.startsWith('*') || t.startsWith('/*')) return;
-        if (forbidden.test(line)) offenders.push(`${name}:${i + 1} — ${t.slice(0, 60)}`);
+        if (!/['"](node:)?fs(\/promises)?['"]/.test(line)) return;
+        if (name === 'properties.ts' && t === allowed) return;
+        offenders.push(`${name}:${i + 1} — ${t.slice(0, 60)}`);
       });
   }
   assert.deepEqual(offenders, [], 'these reach the state rather than receiving it');
@@ -138,11 +144,20 @@ test('nothing untrusted is passed as a shell word', () => {
   // contract looks authoritative — which is exactly how --store, --store-file
   // and --request ended up documented at the same time.
   const retired = /--store-file|--harvest-file|--photo-on-disk|--store\b/;
-  assert.ok(!retired.test(props + scrape), 'one transport in the code');
+  // Tests included — a test's NAME is a string a failing run prints, and one
+  // was still printing a retired flag. SOURCES is deliberately non-test for the
+  // runnable-command check above, so this reads the directory. This file is
+  // excluded: it defines the spellings, and scanning a rule's own words is how
+  // two earlier tests here died.
+  const code = fs
+    .readdirSync(SCRIPTS)
+    .filter((n) => n.endsWith('.ts') && n !== 'commands.test.ts')
+    .map((n) => fs.readFileSync(path.join(SCRIPTS, n), 'utf8'))
+    .join('\n');
+  assert.ok(!retired.test(code), 'one transport in the code');
   assert.ok(!retired.test(skillText + readme), 'and one in the instructions');
 
-  const skill = fs.readFileSync(path.join(BUNDLE, 'SKILL.md'), 'utf8');
-  for (const fence of skill.matchAll(/```sh\n([\s\S]*?)```/g)) {
+  for (const fence of skillText.matchAll(/```sh\n([\s\S]*?)```/g)) {
     for (const line of fence[1].split('\n')) {
       if (!/(properties|scrape)\.ts/.test(line)) continue;
       assert.match(line, /--request/, `local transforms take a request file: ${line.trim()}`);
@@ -257,6 +272,27 @@ test('the port is freed without the shell killing itself', () => {
   assert.ok(load, 'SKILL.md must show the job being loaded');
   assert.match(load, /lsof -ti :8787/, 'free the port by what holds it, not by a name pattern');
   assert.ok(!/pkill -f .http\.server/.test(load), 'that pattern matches the running shell');
+});
+
+test('the docs say how state reaches the scripts', () => {
+  // Asserted as the presence of the correct claim rather than the absence of
+  // the retired ones. Six copies of "never touches a filesystem" / "takes the
+  // store as an argument" outlived the --request cutover and were corrected one
+  // per review round; a list of the five spellings then let the sixth through,
+  // because it said "Nothing here touches". A synonym always walks through an
+  // absence scan. Same reasoning as the at-login test below.
+  // Anchored to the contract sentence PAIRED with its output half, not to the
+  // phrase anywhere in the file: SKILL.md names the request file in three
+  // unrelated steps, so a loose match ran green against the very paragraph
+  // this exists to pin.
+  const contract: Array<[string, RegExp]> = [
+    ['SKILL.md', /State arrives in the `--request` file[\s\S]{0,120}?JSON envelope/i],
+    ['README.md', /arrive in a request file[\s\S]{0,120}?comes out\s+on stdout/i],
+  ];
+  for (const [name, claim] of contract) {
+    const text = fs.readFileSync(path.join(BUNDLE, name), 'utf8');
+    assert.match(text, claim, `${name} must state the request-file contract where it describes the transport`);
+  }
 });
 
 test('the docs say the job starts at login', () => {
