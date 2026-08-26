@@ -92,11 +92,9 @@ credential to your Mac, so what is reachable from its skill directory is worth
 being narrow about.
 
 **Your credentials never live in either place.** They live in
-`~/.hermes-property/.env`. A stray `.env` at the root of this checkout would be
-outside the mount — but one inside `skill/` would not, which is what
-`test_nothing_credential_shaped_sits_inside_the_mount` exists to catch, walking
-the filesystem rather than git because an untracked file is mounted just the
-same.
+`~/.hermes-property/.env`. The obvious slip — `cp .env.example .env` — lands at
+the root of this checkout, which is outside the mount, so it stays out of the
+container. Nothing enforces that for a file put inside `skill/` directly; don't.
 
 ### Deploying a change
 
