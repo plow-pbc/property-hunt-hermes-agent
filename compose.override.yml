@@ -16,8 +16,16 @@
 # from the registry row and is absolute, the same idiom the template uses for
 # AGENT_HOME. It is per-row, so a second person's checkout mounts their own.
 #
+# ${AGENT_DIR}/skill, not ${AGENT_DIR}. The mount -- not git -- is the boundary
+# between this repo and the agent, and this agent reads attacker-controlled
+# input: a listing page's own JSON-LD, a pasted URL, a texted screenshot. So
+# the checkout root stays outside it. Mounting the root would hand the skill
+# directory .git, agent.env, config.yaml, tests/, and anything an operator drops
+# in the checkout -- `cp .env.example .env` being the obvious one, untracked and
+# therefore invisible to every guard that reads git.
+#
 # Read-only: the agent runs these, it does not edit them.
 services:
   hermes:
     volumes:
-      - ${AGENT_DIR:?set by agent-mgr from the registry}:/opt/data/skills/productivity/property-hunt:ro
+      - ${AGENT_DIR:?set by agent-mgr from the registry}/skill:/opt/data/skills/productivity/property-hunt:ro

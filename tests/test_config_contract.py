@@ -167,15 +167,33 @@ def test_the_override_adds_exactly_one_read_only_skill_mount():
     # ${AGENT_DIR}, never a relative path: agent-mgr passes its own
     # templates/compose.yml as the FIRST -f, and Compose resolves relative bind
     # paths against that file's directory -- so "./" here mounts agent-mgr.
-    assert source.startswith("${AGENT_DIR"), source
+    # ${AGENT_DIR}/skill, not ${AGENT_DIR}: the mount is the boundary between
+    # this repo and an agent that reads attacker-controlled input, so the
+    # checkout root -- .git, agent.env, config.yaml, tests/, and any stray .env
+    # an operator drops in -- stays outside it.
+    assert source == "${AGENT_DIR:?set by agent-mgr from the registry}/skill", source
     assert target == "/opt/data/skills/productivity/property-hunt", target
     assert mode == "ro", "the agent runs these, it does not edit them"
 
 
 def test_the_mounted_tree_carries_what_the_instructions_call():
-    """SKILL.md's commands are relative to the skill directory, which is this repo."""
-    skill = (ROOT / "SKILL.md").read_text()
-    assert "scripts/properties.ts" in skill and "scripts/scrape.ts" in skill
+    """SKILL.md's commands are relative to the skill directory, which is skill/."""
+    skill_dir = ROOT / "skill"
+    text = (skill_dir / "SKILL.md").read_text()
+    assert "scripts/properties.ts" in text and "scripts/scrape.ts" in text
     for needed in ("scripts/properties.ts", "scripts/scrape.ts", "references"):
-        assert (ROOT / needed).exists(), f"the mount would carry no {needed}"
+        assert (skill_dir / needed).exists(), f"the mount would carry no {needed}"
+
+
+def test_the_deployment_half_stays_out_of_the_mount():
+    """What the agent can read is skill/, and these are deliberately not in it.
+
+    The mount, not git, is the boundary: an untracked file in the checkout is
+    invisible to every guard that reads the index but is handed to the container
+    all the same. Keeping the descriptor, the config and the tests at the root
+    means the obvious `cp .env.example .env` lands outside the agent's reach.
+    """
+    for outside in ("agent.env", "config.yaml", ".env.example", "compose.override.yml", "tests"):
+        assert (ROOT / outside).exists(), f"{outside} moved -- is it inside the mount now?"
+        assert not (ROOT / "skill" / outside).exists(), f"{outside} is inside the mounted tree"
 
