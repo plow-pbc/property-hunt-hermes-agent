@@ -19,7 +19,8 @@ these scripts on the Mac to fall out of step with you.
 So every change to the store is three moves:
 
 1. **Read** `~/Plow/properties/data.js` with `plow_read_file`
-2. **Transform** it by running a script here, passing the contents as `--store`
+2. **Transform** it by running a script here, passing everything in one
+   `--request` file
 3. **Write** the result back with `plow_write_file`
 
 The scripts never touch a filesystem. They take the store as an argument and
@@ -153,9 +154,11 @@ value here that is yours.
 Set `photoOnDisk` to `true` only when refreshing a property whose photo file is
 already on the Mac.
 
-Add `--photo-on-disk` when you are refreshing a property whose photo file is
-already on the Mac. Leaving it off costs a re-fetch; claiming it wrongly leaves
-a pin pointing at nothing.
+Set `"photoOnDisk": true` in the request when refreshing a property whose photo
+file is already on the Mac. It does two things: the record can carry the old
+photo forward if this scrape finds none, and `store_without_photo` keeps that
+existing pin instead of clearing it. Leaving it off costs a re-fetch; claiming
+it wrongly leaves a pin pointing at nothing.
 
 **7. Fetch the photo first, if the envelope carried a `fetch`.**
 
@@ -190,6 +193,12 @@ turns the map into a probe of the user's own network.
 |---|---|
 | succeeded, or there was no `fetch` | `store` |
 | failed | `store_without_photo` |
+
+`store_without_photo` is not always a record with no photo. With
+`"photoOnDisk": true` it keeps the pin that is already on the Mac, because the
+staged download leaves that file untouched — clearing it would delete a working
+photo to record a failure that cost nothing. Only when there is no prior file
+does the photo become `null`.
 
 ```json
 { "tool": "plow_write_file", "path": "/Users/<user>/Plow/properties/data.js", "content": "<the one you chose>" }
@@ -369,9 +378,10 @@ logs in — tell them that rather than promising it comes back on its own.
   honest.
 - **Never invent a value.** If the scrape did not find the price, it is `null`.
   Say you could not find it.
-- **Always pass `--store`.** Every command refuses without it rather than
-  assuming an empty store, because assuming would discard every property on the
-  write that follows.
+- **Always pass a `--request` file with a `store` in it.** Every command
+  refuses without one rather than assuming an empty store, because assuming
+  would discard every property on the write that follows. Nothing is ever
+  passed as a shell word.
 - A property with no coordinates still gets saved; the map lists it under
   *"not on the map"* rather than dropping it.
 

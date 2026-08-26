@@ -66,20 +66,15 @@ test('an envelope omits what there is nothing to do about', () => {
 });
 
 test('set prints the new store and touches no disk', () => {
-  const { out } = run({ verb: 'set', id: ID, field: 'notes', value: "needs a roof, don't love the kitchen", store: store() });
-  const env = JSON.parse(out);
+  const env = JSON.parse(run({ verb: 'set', id: ID, field: 'notes', value: 'a note', store: store() }).out);
   assert.equal(env.verb, 'updated');
   assert.equal(env.id, ID);
   const rows = loadStore(env.store);
-  assert.equal(rows[0].mine.notes, "needs a roof, don't love the kitchen", 'the apostrophe survives argv');
+  assert.equal(rows[0].mine.notes, 'a note');
   assert.equal(rows[0].scraped.address, '424 28th Street', 'scraped is untouched by a mine edit');
   assert.equal(env.fetch, undefined);
 });
 
-test('multi-word notes arrive whole', () => {
-  const env = JSON.parse(run({ verb: 'set', id: ID, field: 'notes', value: 'needs a new roof', store: store() }).out);
-  assert.equal(loadStore(env.store)[0].mine.notes, 'needs a new roof');
-});
 
 test('rm prints the new store and names the photo rather than deleting it', () => {
   const env = JSON.parse(run({ verb: 'rm', id: ID, store: store({ photo: 'photos/x.jpg' }) }).out);
@@ -111,11 +106,17 @@ test('every verb refuses to run without a store', () => {
   }
 });
 
-test('shell metacharacters in a note survive intact', () => {
-  // The reason the request file exists. None of this is ever a shell word.
-  const nasty = `'; touch /tmp/pwned; echo '$(whoami)` + '`id`' + ' "quoted" \\backslash';
-  const env = JSON.parse(run({ verb: 'set', id: ID, field: 'notes', value: nasty, store: store() }).out);
-  assert.equal(loadStore(env.store)[0].mine.notes, nasty);
+test('a note survives the request file exactly as typed', () => {
+  // One table: both cases are the same contract — the value goes in as JSON,
+  // never as a shell word, so nothing in it is ever parsed as syntax.
+  for (const value of [
+    'needs a new roof',
+    "needs a roof, don't love the kitchen",
+    `'; touch /tmp/pwned; echo '$(whoami)` + '`id`' + ' "quoted" \\backslash',
+  ]) {
+    const env = JSON.parse(run({ verb: 'set', id: ID, field: 'notes', value, store: store() }).out);
+    assert.equal(loadStore(env.store)[0].mine.notes, value, JSON.stringify(value).slice(0, 40));
+  }
 });
 
 test('a blank --store is refused rather than read as an empty store', () => {

@@ -34,9 +34,6 @@ function harvest(
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import * as fs from 'node:fs';
-import * as os from 'node:os';
-import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -108,9 +105,6 @@ test('scrape refuses to run without a request at all', () => {
 test('a refresh keeps only the enrichment this run failed to produce', () => {
   const build = (lat: number | null, lng: number | null, photo: string | null) =>
     ({ lat, lng, photo }) as Scraped;
-  // Photo carry-forward is filesystem-backed and has its own test below; this
-  // matrix covers the coordinate contract, so an empty dir is the right input.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'property-hunt-coords-'));
 
   for (const { name, fresh, previous, kept, expected } of [
     {

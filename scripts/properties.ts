@@ -45,11 +45,6 @@ export function envelope(e: Envelope): string {
 }
 
 /**
- * The store text, from `--store`. Absent is fatal, deliberately: defaulting to
- * an empty store would print a valid-looking envelope whose write discards
- * every property the operator has.
- */
-/**
  * One request file, and nothing else.
  *
  * Every value these scripts handle is untrusted: the harvest payload IS a
