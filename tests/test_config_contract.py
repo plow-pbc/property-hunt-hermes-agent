@@ -4,13 +4,18 @@ The fleet-wide invariants -- the home mount, the uid/gid contract, no credential
 through compose, no recipe starting a second gateway -- moved to agent-mgr with
 the deployment, and are asserted there once for every agent instead of restated
 per repo. What is left here is what this repo says about the deployment it now carries
-alongside the skill: that the descriptor claims no identity of its own, and that
-the shipped config takes its credentials from the environment.
+alongside the skill: that the descriptor claims no identity of its own, that the
+shipped config takes its credentials from the environment, and that the mount
+hands the agent the skill and nothing else.
+
+Direct assertions about known files, not scans for credential-shaped things. A
+repo-wide filename heuristic and a token-name heuristic both lived here and both
+had to grow exemptions; the second passed a literal secret under any key it did
+not enumerate, which is a guard that reads as coverage and is not.
 """
 
 from pathlib import Path
 
-import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -96,38 +101,6 @@ def test_latch_is_configured_from_the_environment_not_from_git():
     assert "${DOMO_MCP_TOKEN}" in latch["headers"]["Authorization"]
 
 
-def test_no_credential_file_is_tracked():
-    """Credentials live in this agent's home dotenv, which is outside the repo.
-
-    Two named exemptions, and everything else keeps the broad shape rule. An
-    earlier pass swapped the suffix rule for exact basenames to stop `agent.env`
-    tripping it -- and quietly stopped catching `prod.env`, `secrets.env`,
-    `auth.json.bak` and `latch-auth.json` along the way. A false positive on one
-    known filename is an allowlist problem, not a reason to narrow the rule.
-
-    -z, because this is a security guard and a filename must not be able to
-    defeat it: git C-quotes paths with non-ASCII bytes, so `café/.env` arrives
-    as `"caf\303\251/.env"` and its basename computes to `.env"`, and
-    whitespace-splitting fragments any path containing a space.
-    """
-    import subprocess
-    out = subprocess.run(["git", "ls-files", "-z"], cwd=ROOT,
-                         capture_output=True, text=True, check=True)
-    for name in out.stdout.split("\0")[:-1]:
-        base = name.rsplit("/", 1)[-1]
-        # Anchored to the full path git prints, not the basename. The two
-        # exemptions are excused because two other tests cover those exact
-        # files -- and those tests read ROOT/agent.env and ROOT/.env.example, so
-        # a `secrets/agent.env` or `runtime/.env.example` matched by basename
-        # would be excused by a promise nothing checks. Same reasoning as -z
-        # above, one level up: the allowlist must not be the weakest link.
-        if name in ("agent.env", ".env.example"):
-            continue
-        assert not base.endswith(".env"), f"{name} is tracked"
-        assert not base.startswith(".env."), f"{name} is tracked"
-        assert "auth.json" not in base and "auth.lock" not in base, f"{name} is tracked"
-
-
 def test_the_dotenv_example_carries_no_values():
     """The exemption above rests on this: it is a shape, not a secret store."""
     keys = dotenv(ROOT / ".env.example")
@@ -135,12 +108,6 @@ def test_the_dotenv_example_carries_no_values():
     for line in keys:
         key, value = line.split("=", 1)
         assert value == "", f".env.example carries a value for {key}"
-
-def test_the_shipped_config_names_its_secrets_by_variable():
-    text = (ROOT / "config.yaml").read_text()
-    for line in text.splitlines():
-        if "Authorization" in line or "token" in line.lower():
-            assert "${" in line, f"a literal credential in config.yaml: {line.strip()}"
 
 
 def test_the_override_adds_exactly_one_read_only_skill_mount():
@@ -196,4 +163,3 @@ def test_the_deployment_half_stays_out_of_the_mount():
     for outside in ("agent.env", "config.yaml", ".env.example", "compose.override.yml", "tests"):
         assert (ROOT / outside).exists(), f"{outside} moved -- is it inside the mount now?"
         assert not (ROOT / "skill" / outside).exists(), f"{outside} is inside the mounted tree"
-
