@@ -13,6 +13,15 @@ import { HARVEST_EXPRESSION } from './scrape.ts';
 const SCRIPTS = fileURLToPath(new URL('.', import.meta.url));
 const BUNDLE = path.dirname(SCRIPTS);
 
+// Both documents print commands, and they no longer live together: SKILL.md is
+// in the mounted skill tree, README.md is the operator's at the repo root one
+// level up. Resolved once here -- three separate loops read both, and each
+// carrying its own path is how the move under skill/ broke two of them while
+// an existsSync guard silently swallowed the third.
+const DOCS = ['SKILL.md', 'README.md'] as const;
+const docPath = (doc: (typeof DOCS)[number]) =>
+  doc === 'SKILL.md' ? path.join(BUNDLE, doc) : path.join(path.dirname(BUNDLE), doc);
+
 const SOURCES: Array<{ name: string; text: string; lineOffset?: number }> = fs
   .readdirSync(SCRIPTS)
   .filter((name) => name.endsWith('.ts') && !name.endsWith('.test.ts'))
@@ -26,8 +35,8 @@ const SOURCES: Array<{ name: string; text: string; lineOffset?: number }> = fs
 // Each fence is its own entry carrying its offset in the file: joining them
 // into one blob makes every reported line number wrong, and the report exists
 // solely to point at the site.
-for (const doc of ['SKILL.md', 'README.md']) {
-  const full = path.join(BUNDLE, doc);
+for (const doc of DOCS) {
+  const full = docPath(doc);
   if (!fs.existsSync(full)) continue;
   const text = fs.readFileSync(full, 'utf8');
   for (const fence of text.matchAll(/```(?:sh|bash)\n([\s\S]*?)```/g)) {
@@ -91,8 +100,8 @@ test('no doc still tells the agent to escape a shell', () => {
   // Under plow_run_command values are argv elements. Advice to wrap them in
   // single quotes and replace ' with \'\\\'\' would make every note arrive
   // with literal backslashes in it.
-  for (const doc of ['SKILL.md', 'README.md']) {
-    const text = fs.readFileSync(path.join(BUNDLE, doc), 'utf8');
+  for (const doc of DOCS) {
+    const text = fs.readFileSync(docPath(doc), 'utf8');
     assert.doesNotMatch(text, /single-quote/i, `${doc} still teaches shell quoting`);
     assert.doesNotMatch(text, /\\'\\\\'\\'/, `${doc} still carries the escape recipe`);
   }
@@ -138,7 +147,7 @@ test('nothing untrusted is passed as a shell word', () => {
   assert.match(props, /--request/);
   assert.match(scrape, /takeRequest/);
   const skillText = fs.readFileSync(path.join(BUNDLE, 'SKILL.md'), 'utf8');
-  const readme = fs.readFileSync(path.join(BUNDLE, 'README.md'), 'utf8');
+  const readme = fs.readFileSync(docPath('README.md'), 'utf8');
   // The instructions too, not just the code. A retired flag left in prose is
   // worse than a wrong one, because the agent follows it and each surviving
   // contract looks authoritative — which is exactly how --store, --store-file
@@ -273,8 +282,8 @@ test('the docs say the job starts at login', () => {
   // absence of the wrong one — a scan for "across reboots" also flags the
   // sentence explaining why not to say it, which is how the two previous
   // versions of this test failed.
-  for (const name of ['SKILL.md', 'README.md']) {
-    const text = fs.readFileSync(path.join(BUNDLE, name), 'utf8');
+  for (const name of DOCS) {
+    const text = fs.readFileSync(docPath(name), 'utf8');
     assert.match(text, /at login/i, `${name} must say when the job actually starts`);
   }
 });

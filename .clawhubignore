@@ -1,6 +1,0 @@
-# Files that stay in the repo but must not ship in the published skill.
-# `clawhub publish` honours this on top of .gitignore.
-#
-# Nothing is excluded today. The *.test.ts files and their fixtures ship on
-# purpose — SKILL.md § Checking your own work runs them from the installed
-# bundle.
