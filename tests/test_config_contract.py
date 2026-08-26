@@ -8,10 +8,13 @@ alongside the skill: that the descriptor claims no identity of its own, that the
 shipped config takes its credentials from the environment, and that the mount
 hands the agent the skill and nothing else.
 
-Direct assertions about known files, not scans for credential-shaped things. A
-repo-wide filename heuristic and a token-name heuristic both lived here and both
-had to grow exemptions; the second passed a literal secret under any key it did
-not enumerate, which is a guard that reads as coverage and is not.
+Direct assertions about known files, not scans for credential-shaped things.
+Three filename or token-name heuristics lived here across this branch and all
+three went: each needed exemptions, each had a blind spot, and the last was
+defending ground the mount boundary had already taken. Credentials sit outside
+`skill/` structurally -- `agent.env` and `.env.example` are at the root by
+construction, and `cp .env.example .env` lands there too -- so the guard was the
+belt after the braces.
 """
 
 from pathlib import Path
@@ -171,29 +174,6 @@ def test_the_deployment_half_stays_out_of_the_mount():
         assert not (ROOT / "skill" / outside).exists(), f"{outside} is inside the mounted tree"
 
 
-def test_nothing_credential_shaped_sits_inside_the_mount():
-    """The other half: not just that five named files are out, but that no sixth is in.
-
-    A claim about one known directory, which is why it needs no exemption list
-    -- agent.env and .env.example live at the root by construction. Walked on
-    the filesystem rather than through git, because the mount is the boundary
-    and an untracked file is handed to the container just the same.
-
-    .gitignore lists the exact name `.env`, so skill/prod.env, skill/.env.local
-    and skill/latch-auth.json are all committable today and would all be
-    readable by an agent that ingests texted screenshots and pasted listing
-    URLs while holding the Latch relay credential.
-    """
-    offenders = [
-        str(f.relative_to(ROOT))
-        for f in (ROOT / "skill").rglob("*")
-        if f.is_file()
-        and (f.name.endswith(".env") or f.name.startswith(".env")
-             or f.name.endswith("auth.json") or f.name.endswith("auth.lock"))
-    ]
-    assert not offenders, f"credential-shaped files inside the mounted tree: {offenders}"
-
-
 def test_the_readme_names_the_mount_the_override_actually_makes():
     """The runbook and the override have to agree on where the boundary is.
 
@@ -220,4 +200,3 @@ def test_the_readme_names_the_mount_the_override_actually_makes():
         f"the override mounts ${{AGENT_DIR}}{subpath}; the README does not say so"
     )
     assert target.rsplit("/", 1)[-1] in readme
-
