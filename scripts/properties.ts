@@ -1,73 +1,112 @@
 #!/usr/bin/env node
-// The store CLI: reading, and editing the fields the user owns. Adding and
-// refreshing belong to scrape.ts, which writes the store itself. Between them
-// they are the only writers — nothing hand-edits data.js, which is what keeps
-// every write atomic and scraped values honest about where they came from.
-import * as fs from 'node:fs';
-import * as path from 'node:path';
-import * as os from 'node:os';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+// The store CLI. Every command takes the store's text and prints what should
+// replace it; nothing here writes a file. The store arrives in the request file
+// the agent wrote — a shell-quoted one would let an apostrophe in a listing
+// become command syntax.
+//
+// The store lives on the operator's Mac and this runs in the agent's container,
+// so the agent is the transport: it reads data.js through Latch, runs one of
+// these, and writes the result back. Keeping the logic in one pinned place is
+// the point — a second copy on the Mac is what drifted before.
+import { readFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 
-import { emptyStoreText, readStore, removeProperty, setMine, writeStore, MINE_FIELDS } from './store.ts';
+import { loadStore, removeProperty, serializeStore, setMine, MINE_FIELDS } from './store.ts';
 import type { Property } from './store.ts';
 
-const BUNDLE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const FRONTEND_TEMPLATE = path.join(BUNDLE_ROOT, 'references', 'frontend');
+/** What the agent has to do on the Mac after a transform. */
+export type Fetch = { url: string; resolve: string; path: string };
 
-const USAGE = `property-hunt store
-
-  init                              scaffold the properties folder (idempotent)
-  list [--json]                     every property
-  get <id>                          one property as JSON
-  set <id> <field> <value>          ${MINE_FIELDS.join(' | ')}
-  rm <id>                           delete the property and its photo
-  where                             print the folder being used
-
-Adding and refreshing a property is a separate command — see SKILL.md.
-
-The data folder is $PROPERTY_HUNT_DIR, else ~/Plow/properties.
-
-Values are passed as separate arguments, never concatenated into one string, so
-an apostrophe in a note needs no escaping.`;
+export type Envelope = {
+  store?: string;
+  /**
+   * What to write when a `fetch` fails. Present only alongside one.
+   *
+   * The transform cannot know whether the agent's curl will succeed, and the
+   * store is written before it runs — so without this a hotlink-blocking CDN
+   * or a 302 (which --max-redirs 0 refuses) leaves a record pointing at a file
+   * that never arrived. The map renders that as a broken image, which is the
+   * outcome keepPreviousEnrichment exists to avoid, and it is unrecoverable:
+   * on the next refresh the photo field is non-null, so the carry-forward
+   * branch never fires and nothing ever nulls it.
+   */
+  store_without_photo?: string;
+  fetch?: Fetch;
+  remove?: string[];
+  id?: string;
+  verb?: string;
+  notes?: string[];
+};
 
 /**
- * Resolve the data folder. Everything runs on the user's own Mac now, so there
- * is one real answer and one override the tests use.
+ * One envelope per mutating command, on stdout. Absent keys mean "nothing to
+ * do" rather than an empty value, so the agent branches on presence.
  */
-export function resolveDataDir(env: NodeJS.ProcessEnv = process.env): string {
-  const override = env.PROPERTY_HUNT_DIR?.trim();
-  if (override) return path.resolve(override);
-  return path.join(os.homedir(), 'Plow', 'properties');
+export function envelope(e: Envelope): string {
+  return `${JSON.stringify(e)}\n`;
 }
 
-function copyTree(from: string, to: string): void {
-  fs.mkdirSync(to, { recursive: true });
-  for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
-    const src = path.join(from, entry.name);
-    const dest = path.join(to, entry.name);
-    if (entry.isDirectory()) copyTree(src, dest);
-    else fs.copyFileSync(src, dest);
+/**
+ * One request file, and nothing else.
+ *
+ * Every value these scripts handle is untrusted: the harvest payload IS a
+ * listing page's JSON-LD, the store holds the user's own notes, the listing
+ * URL is pasted, and a note is whatever they typed. Any of them inside shell
+ * source lets an apostrophe end the quote and the rest become command syntax
+ * in the agent's container — and a URL cannot be validated first, because the
+ * shell has already parsed it by then.
+ *
+ * So none of them are arguments. The agent writes one JSON file and passes its
+ * path, which is a value it chose itself.
+ */
+export type Request = {
+  store: string;
+  verb?: string;
+  id?: string;
+  field?: string;
+  value?: string;
+  json?: boolean;
+  harvest?: string;
+  url?: string;
+  photoOnDisk?: boolean;
+};
+
+export function takeRequest(argv: string[], read = (p: string) => readFileSync(p, 'utf8')): Request {
+  const at = argv.indexOf('--request');
+  if (at === -1 || argv[at + 1] === undefined) {
+    throw new Error(`missing --request <path to a JSON request>\n\n${USAGE}`);
   }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(read(argv[at + 1]));
+  } catch (err) {
+    throw new Error(`could not read the request at ${argv[at + 1]}: ${(err as Error).message}`);
+  }
+  const req = parsed as Request;
+  if (typeof req?.store !== 'string') {
+    throw new Error('the request needs a "store" string — the contents of data.js');
+  }
+  return req;
 }
 
-function init(dir: string): void {
-  fs.mkdirSync(path.join(dir, 'photos'), { recursive: true });
+const USAGE = `property-hunt store — one JSON request file, no other arguments
 
-  if (!fs.existsSync(FRONTEND_TEMPLATE)) {
-    throw new Error(`bundle is incomplete: no frontend template at ${FRONTEND_TEMPLATE}`);
-  }
-  // The frontend is bundle-owned, so refresh it on every init to pick up skill
-  // upgrades. data.js is user-owned and must survive untouched.
-  copyTree(FRONTEND_TEMPLATE, dir);
+  node properties.ts --request <path>
 
-  const store = path.join(dir, 'data.js');
-  if (fs.existsSync(store)) {
-    process.stdout.write(`ready: ${dir} (kept ${readStore(dir).length} existing properties)\n`);
-    return;
-  }
-  fs.writeFileSync(store, emptyStoreText());
-  process.stdout.write(`ready: ${dir}\n`);
-}
+The file holds everything, because every value here is untrusted — the store
+carries the user's notes, and a note is whatever they typed:
+
+  { "verb": "list", "json": true,        "store": "<contents of data.js>" }
+  { "verb": "get",  "id": "<id>",        "store": "…" }
+  { "verb": "set",  "id": "<id>", "field": "${MINE_FIELDS.join('|')}", "value": "…", "store": "…" }
+  { "verb": "rm",   "id": "<id>",        "store": "…" }
+
+Nothing is passed as a shell word, so no apostrophe or metacharacter in a note,
+an id, or the store can become command syntax. Adding and refreshing a property
+is a separate command — see SKILL.md.
+
+list and get print their output. set and rm print a JSON envelope: the new
+store, plus anything the agent must do on the Mac.`;
 
 function requireArg(value: string | undefined, name: string): string {
   if (value === undefined || value === '') throw new Error(`missing <${name}>\n\n${USAGE}`);
@@ -95,27 +134,18 @@ function summarize(row: Property): string {
 }
 
 function main(argv: string[]): void {
-  const [verb, ...rest] = argv;
-  const dir = resolveDataDir();
-
-  if (!verb || verb === '--help' || verb === '-h') {
+  if (argv[0] === '--help' || argv[0] === '-h' || argv.length === 0) {
     process.stdout.write(`${USAGE}\n`);
     return;
   }
-  if (verb === 'where') {
-    process.stdout.write(`${dir}\n`);
-    return;
-  }
-  if (verb === 'init') {
-    init(dir);
-    return;
-  }
 
-  const rows = readStore(dir);
+  const req = takeRequest(argv);
+  const rows = loadStore(req.store);
+  const verb = req.verb;
 
   switch (verb) {
     case 'list': {
-      if (rest.includes('--json')) {
+      if (req.json) {
         process.stdout.write(`${JSON.stringify(rows, null, 2)}\n`);
       } else if (rows.length === 0) {
         process.stdout.write('no properties yet\n');
@@ -126,24 +156,36 @@ function main(argv: string[]): void {
       return;
     }
     case 'get': {
-      process.stdout.write(`${JSON.stringify(findOrThrow(rows, requireArg(rest[0], 'id')), null, 2)}\n`);
+      process.stdout.write(`${JSON.stringify(findOrThrow(rows, requireArg(req.id, 'id')), null, 2)}\n`);
       return;
     }
     case 'set': {
-      const id = requireArg(rest[0], 'id');
-      const field = requireArg(rest[1], 'field');
-      const value = rest.slice(2).join(' ');
-      const next = setMine(rows, id, field, value);
-      writeStore(dir, next);
-      process.stdout.write(`${id}: ${field} = ${JSON.stringify(value)}\n`);
+      const id = requireArg(req.id, 'id');
+      findOrThrow(rows, id);
+      const field = requireArg(req.field, 'field');
+      const value = req.value ?? '';
+      process.stdout.write(
+        envelope({
+          store: serializeStore(setMine(rows, id, field, value)),
+          id,
+          verb: 'updated',
+          notes: [`${field} = ${JSON.stringify(value)}`],
+        }),
+      );
       return;
     }
     case 'rm': {
-      const id = requireArg(rest[0], 'id');
+      const id = requireArg(req.id, 'id');
       const row = findOrThrow(rows, id);
-      writeStore(dir, removeProperty(rows, id));
-      if (row.scraped.photo) fs.rmSync(path.join(dir, row.scraped.photo), { force: true });
-      process.stdout.write(`removed ${id}\n`);
+      process.stdout.write(
+        envelope({
+          store: serializeStore(removeProperty(rows, id)),
+          id,
+          verb: 'removed',
+          // Named, never deleted here. Nothing in this process reaches the Mac.
+          ...(row.scraped.photo ? { remove: [row.scraped.photo] } : {}),
+        }),
+      );
       return;
     }
     default:

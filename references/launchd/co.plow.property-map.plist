@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Serves the map to the tailnet, starting at login.
+
+  A LaunchAgent runs in the user's GUI session: it starts when they log in and
+  stops when they log out. It does NOT start at boot before anyone logs in —
+  say "at login", not "across reboots", anywhere this is described.
+
+  Loopback only, deliberately: Tailscale is the sole route in and it is
+  tailnet-scoped. Binding the wildcard address would publish the map, and the
+  addresses of houses someone is considering, to the whole LAN.
+
+  The agent substitutes @PYTHON@, @PORT@ and @DIR@ and writes the result to
+  ~/Library/LaunchAgents/co.plow.property-map.plist. @PYTHON@ is resolved on
+  the Mac rather than hardcoded: /usr/bin/python3 is the Command Line Tools
+  shim, and without CLT installed it tries to prompt for an install, which
+  under launchd is a non-zero exit into a KeepAlive respawn loop — invisible,
+  because the Tailscale proxy stays configured and the map just goes blank.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>co.plow.property-map</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>@PYTHON@</string>
+    <string>-m</string><string>http.server</string><string>@PORT@</string>
+    <string>--bind</string><string>127.0.0.1</string>
+    <string>--directory</string><string>@DIR@</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/tmp/property-map.log</string>
+  <key>StandardErrorPath</key><string>/tmp/property-map.log</string>
+</dict>
+</plist>

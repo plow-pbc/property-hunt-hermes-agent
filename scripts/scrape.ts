@@ -6,23 +6,17 @@
 // HARVEST_EXPRESSION below and hands the result here; this reads only
 // standards-based surfaces from that payload, geocodes the address, and
 // downloads the hero photo.
-import * as fs from 'node:fs';
-import * as path from 'node:path';
 import * as net from 'node:net';
 import * as dns from 'node:dns/promises';
-import * as http from 'node:http';
-import * as https from 'node:https';
 import { pathToFileURL } from 'node:url';
 
 import { extractScraped, geocodeQuery } from './extract.ts';
 import type { PageSurfaces } from './extract.ts';
-import { coerceScraped, readStore, slugify, storableUrl, upsertScraped, writeStore } from './store.ts';
+import { coerceScraped, loadStore, serializeStore, slugify, storableUrl, upsertScraped } from './store.ts';
 import type { Scraped } from './store.ts';
-import { resolveDataDir } from './properties.ts';
+import { envelope, takeRequest } from './properties.ts';
+import type { Fetch } from './properties.ts';
 
-const MAX_PHOTO_REDIRECTS = 3;
-const MAX_PHOTO_BYTES = 20 * 1024 * 1024;
-const PHOTO_TIMEOUT_MS = 20_000;
 const NOMINATIM = 'https://nominatim.openstreetmap.org/search';
 // Nominatim's usage policy requires a descriptive agent identifying the app.
 const USER_AGENT = 'property-hunt/0.1 (personal property tracker; https://clawhub.ai)';
@@ -30,10 +24,6 @@ const USER_AGENT = 'property-hunt/0.1 (personal property tracker; https://clawhu
 /** A failed lookup is a tool *result*, not a crashed command: the agent reads it and speaks. */
 function toolError(error: string): void {
   process.stdout.write(`${JSON.stringify({ type: 'tool_error', error })}\n`);
-}
-
-function note(message: string): void {
-  process.stderr.write(`${message}\n`);
 }
 
 /**
@@ -226,6 +216,32 @@ function ipv6Bytes(ip: string): number[] | null {
  * loopback for the connect. The caller pins to this address, so there is only
  * ever one resolution to poison.
  */
+/**
+ * Vet the photo URL and say how to fetch it — do not fetch it.
+ *
+ * The URL comes from the listing page's own JSON-LD or og:image, so it is
+ * attacker-controlled text. The vetting below is unchanged. What changes is who
+ * makes the request: the agent, with curl, on the operator's Mac.
+ *
+ * `resolve` is curl's --resolve triple, pinning the address that was vetted so
+ * DNS cannot rebind between the check and the fetch. That is the protection
+ * getPinned used to give, carried across the boundary rather than dropped —
+ * and it matters more now, because the Mac sits on the tailnet and the home
+ * LAN where the container did not.
+ *
+ * Redirects are the caller's to refuse (--max-redirs 0): a hop followed on the
+ * Mac would be an unvetted request, and nothing here can vet it.
+ */
+export async function photoDirective(photoUrl: string, id: string, base: URL): Promise<Fetch> {
+  const hop = await resolvePublicDestination(photoUrl, base);
+  const port = hop.url.port || (hop.url.protocol === 'https:' ? '443' : '80');
+  return {
+    url: hop.url.href,
+    resolve: `${hop.url.hostname}:${port}:${hop.address}`,
+    path: `photos/${id}.jpg`,
+  };
+}
+
 export async function resolvePublicDestination(
   raw: string,
   base?: URL,
@@ -249,87 +265,6 @@ export async function resolvePublicDestination(
 }
 
 /**
- * GET the vetted address, keeping the URL's Host header and TLS servername so
- * pinning breaks neither virtual hosting nor certificate validation.
- */
-function getPinned(
-  url: URL,
-  address: string,
-  family: number,
-): Promise<{ status: number; location: string | null; type: string; body: Buffer }> {
-  const client = url.protocol === 'https:' ? https : http;
-  return new Promise((resolve, reject) => {
-    const request = client.get(
-      url,
-      {
-        headers: { 'User-Agent': USER_AGENT },
-        // Connect to the address already vetted, not to whatever the name
-        // resolves to on a second lookup. Node's happy-eyeballs path calls
-        // lookup with { all: true } and expects an array — answering only the
-        // single-address form yields "Invalid IP address: undefined".
-        lookup: (_host: string, opts: { all?: boolean }, done: Function) =>
-          opts?.all ? done(null, [{ address, family }]) : done(null, address, family),
-        servername: url.hostname.replace(/^\[|\]$/g, ''),
-      } as never,
-      (response) => {
-        const chunks: Buffer[] = [];
-        let bytes = 0;
-        response.on('data', (chunk: Buffer) => {
-          bytes += chunk.length;
-          if (bytes > MAX_PHOTO_BYTES) {
-            request.destroy();
-            reject(new Error(`image exceeds ${MAX_PHOTO_BYTES / 1024 / 1024} MB`));
-            return;
-          }
-          chunks.push(chunk);
-        });
-        response.on('end', () =>
-          resolve({
-            status: response.statusCode ?? 0,
-            location: (response.headers.location as string | undefined) ?? null,
-            type: (response.headers['content-type'] as string | undefined) ?? '',
-            body: Buffer.concat(chunks),
-          }),
-        );
-        response.on('error', reject);
-      },
-    );
-    request.on('error', reject);
-    request.setTimeout(PHOTO_TIMEOUT_MS, () => request.destroy(new Error('image request timed out')));
-  });
-}
-
-async function downloadPhoto(photoUrl: string, dir: string, id: string, base: URL): Promise<string> {
-  // Every hop is resolved and vetted, then connected to by address — a public
-  // URL that 302s inward, or a name that rebinds between check and connect,
-  // both fail here rather than reaching the network behind us.
-  let hop = await resolvePublicDestination(photoUrl, base);
-  let response = await getPinned(hop.url, hop.address, hop.family);
-
-  for (let redirects = 0; response.status >= 300 && response.status < 400; redirects += 1) {
-    if (redirects >= MAX_PHOTO_REDIRECTS) throw new Error(`too many redirects (over ${MAX_PHOTO_REDIRECTS})`);
-    if (!response.location) throw new Error(`HTTP ${response.status} with no redirect target`);
-    hop = await resolvePublicDestination(response.location, hop.url);
-    response = await getPinned(hop.url, hop.address, hop.family);
-  }
-
-  if (response.status < 200 || response.status >= 300) throw new Error(`HTTP ${response.status}`);
-  if (!response.type.startsWith('image/')) {
-    throw new Error(`not an image (${response.type || 'no content-type'})`);
-  }
-
-  const ext = response.type.includes('png') ? '.png' : response.type.includes('webp') ? '.webp' : '.jpg';
-  const relative = path.join('photos', `${id}${ext}`);
-  const destination = path.join(dir, relative);
-  fs.mkdirSync(path.dirname(destination), { recursive: true });
-  // Same atomic discipline as the store: the page may be open on this file.
-  const tmp = `${destination}.tmp-${process.pid}`;
-  fs.writeFileSync(tmp, response.body);
-  fs.renameSync(tmp, destination);
-  return relative;
-}
-
-/**
  * A refresh replaces `scraped` wholesale, so a transient geocoder outage or a
  * dead image host would blank a pin or photo we already had — losing data on
  * what is meant to be a routine price check. Enrichment that failed this run
@@ -338,7 +273,7 @@ async function downloadPhoto(photoUrl: string, dir: string, id: string, base: UR
 export function keepPreviousEnrichment(
   scraped: Scraped,
   previous: Scraped | undefined,
-  dir: string,
+  photoOnDisk: boolean,
 ): string[] {
   if (!previous) return [];
   const kept: string[] = [];
@@ -350,8 +285,8 @@ export function keepPreviousEnrichment(
   // Only carry a photo whose file is still there. Keeping the path blind would
   // paper over a failed download with a record pointing at nothing, which the
   // map renders as a broken image — worse than the honest plain marker.
-  const photoOnDisk = previous.photo !== null && fs.existsSync(path.join(dir, previous.photo));
-  if (scraped.photo === null && photoOnDisk) {
+  // Whether the file is still there is the agent's knowledge now, not ours.
+  if (scraped.photo === null && previous.photo !== null && photoOnDisk) {
     scraped.photo = previous.photo;
     kept.push('photo');
   }
@@ -359,34 +294,30 @@ export function keepPreviousEnrichment(
 }
 
 async function main(): Promise<void> {
-  const url = process.argv[2] === '--harvest' ? (process.argv[4] ?? '') : '';
+  const req = takeRequest(process.argv.slice(2));
+  const url = req.url ?? '';
   if (!storableUrl(url)) {
-    toolError("usage: node scrape.ts --harvest '<eval-result-json>' '<listing-url>'");
+    toolError('usage: node scrape.ts --request <path> — the file needs harvest, url and store');
     return;
   }
 
-  // Read before opening the browser. This is the guard: a missing or damaged
-  // store fails here with an actionable message, rather than after the scrape,
-  // the geocode, and a photo download that has already written an image.
-  // It also gives us what this property looked like before the refresh.
-  const dir = resolveDataDir();
-  const before = readStore(dir);
+  // Parsed before anything else, so a damaged store fails here rather than
+  // after the work — and it gives us what this property looked like before.
+  const before = loadStore(req.store);
 
   let scraped: Scraped;
   let photoUrl: string | null;
   let page: PageSurfaces;
   let settled: boolean;
   try {
-    ({ page, settled } = parseHarvest(process.argv[3] ?? '', url));
+    ({ page, settled } = parseHarvest(req.harvest ?? '', url));
   } catch (err) {
     // The caller's payload, not the page — another poll changes nothing.
     return toolError((err as Error).message);
   }
   try {
     const extracted = extractScraped(page);
-    // The same rules `upsert` applies, so anything unsaveable fails here,
-    // before the geocode and photo download that would otherwise leave an
-    // orphaned image named for a slug no row will ever carry.
+    // The same rules `upsert` applies, so anything unsaveable fails here.
     scraped = coerceScraped(extracted.scraped);
     photoUrl = extracted.photoUrl;
   } catch (err) {
@@ -394,6 +325,10 @@ async function main(): Promise<void> {
   }
 
   const id = slugify(scraped);
+  const notes: string[] = [];
+  // The agent knows whether the previous photo is still on the Mac. Absent
+  // means no, which costs a re-fetch rather than a record pointing at nothing.
+  const photoOnDisk = req.photoOnDisk === true;
 
   // Neither of the next two failures should lose the listing: a property with
   // no pin is still worth having, and the frontend surfaces it explicitly.
@@ -403,27 +338,53 @@ async function main(): Promise<void> {
       scraped.lat = point.lat;
       scraped.lng = point.lng;
     } else {
-      note(`no coordinates found for "${scraped.address}" — it will show under "not on the map"`);
+      notes.push(`no coordinates found for "${scraped.address}" — it will show under "not on the map"`);
     }
   } catch (err) {
-    note(`geocoding failed (${(err as Error).message}) — it will show under "not on the map"`);
+    notes.push(`geocoding failed (${(err as Error).message}) — it will show under "not on the map"`);
   }
 
+  let fetch: Fetch | undefined;
   if (photoUrl) {
     try {
-      scraped.photo = await downloadPhoto(photoUrl, dir, id, new URL(url));
+      fetch = await photoDirective(photoUrl, id, new URL(url));
+      // The record points at where the agent is about to put it.
+      scraped.photo = fetch.path;
     } catch (err) {
-      note(`photo download failed (${(err as Error).message}) — the pin will use a plain marker`);
+      notes.push(`photo unavailable (${(err as Error).message}) — the pin will use a plain marker`);
     }
   }
 
-  for (const field of keepPreviousEnrichment(scraped, before.find((row) => row.id === id)?.scraped, dir)) {
-    note(`kept the previous ${field} for ${id}`);
+  for (const field of keepPreviousEnrichment(scraped, before.find((row) => row.id === id)?.scraped, photoOnDisk)) {
+    notes.push(`kept the previous ${field} for ${id}`);
   }
 
   const next = upsertScraped(before, scraped);
-  writeStore(dir, next);
-  process.stdout.write(`${next.length > before.length ? 'added' : 'refreshed'} ${id}\n`);
+
+  // The alternative store, for when the agent's fetch fails. Built from the
+  // same row with the photo nulled, so the caller never has to choose between
+  // losing the listing and keeping a pin that points at nothing.
+  let withoutPhoto: string | undefined;
+  if (fetch) {
+    // Not always null. On a refresh where the caller says the previous image is
+    // still on the Mac, the staged download leaves that file untouched — so
+    // nulling it would delete a working pin to record a failure that cost
+    // nothing. Only drop the reference when there is no prior file to keep.
+    const priorPhoto = before.find((row) => row.id === id)?.scraped.photo ?? null;
+    const keep = photoOnDisk ? priorPhoto : null;
+    withoutPhoto = serializeStore(upsertScraped(before, { ...scraped, photo: keep }));
+  }
+
+  process.stdout.write(
+    envelope({
+      store: serializeStore(next),
+      ...(withoutPhoto ? { store_without_photo: withoutPhoto } : {}),
+      ...(fetch ? { fetch } : {}),
+      id,
+      verb: next.length > before.length ? 'added' : 'refreshed',
+      ...(notes.length ? { notes } : {}),
+    }),
+  );
 }
 
 // Only run when invoked directly, so tests can import the pieces above.

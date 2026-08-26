@@ -23,19 +23,30 @@ No server. No API key. No account. No build step. Open the HTML file from Finder
 and it works — the map is [Leaflet](https://leafletjs.com), bundled, and your
 data is a plain JSON file the page loads directly.
 
-Four things do go out over the network, and nothing else: the listing lookup
-itself, one download of that listing's photo from whatever host it lives on,
-one [Nominatim](https://nominatim.org) geocoding request per property to turn
-its address into a pin, and [OpenStreetMap](https://www.openstreetmap.org/copyright)
-map tiles fetched while you have the map open. Your notes and ratings never
-leave your Mac.
+Four things go out to strangers, and nothing else: the listing lookup itself,
+one download of that listing's photo from whatever host it lives on, one
+[Nominatim](https://nominatim.org) geocoding request per property to turn its
+address into a pin, and [OpenStreetMap](https://www.openstreetmap.org/copyright)
+map tiles fetched while you have the map open. Your notes and ratings go to
+none of those.
+
+They do travel, though, and it is worth knowing where. Anything you ask about a
+property sends the whole store — notes and ratings included — across the Plow
+relay, because that is how the agent reaches the Mac; an edit sends it back the
+same way. Serving the map to your phone sends it to whichever tailnet device
+opens it.
 
 ## Requirements
 
 A Mac running [Plow Latch](https://github.com/plow-pbc/latch), and a Hermes
-agent you can text. Latch is how the agent reaches the Mac: listing sites refuse
-plain HTTP requests, so the lookup runs through the supervised browser there,
-and the scripts run beside the map they write.
+agent you can text.
+
+**The Mac holds only Latch and your data.** These scripts run in the agent's
+container, from a pinned checkout, and own no state: the store and the harvest
+payload arrive in a request file the agent writes, and the new store comes out
+on stdout. The agent reads `data.js` off the Mac through Latch, runs the
+transform, and writes the result back. Nothing here is installed on the Mac, so
+nothing here can fall out of step with the agent.
 
 [howto.plow.co/property-hunt](https://howto.plow.co/property-hunt) is the
 install guide.
@@ -53,18 +64,29 @@ index.html   the map
 It's yours. Upgrading or removing the skill never touches it. `data.js` is plain
 JSON, so you can read it, diff it, or keep it in git.
 
+## Viewing the map on a phone
+
+Ask the agent to serve it. It installs a small launchd job on the Mac that
+starts a loopback-bound file server **at login**, then points Tailscale at
+that port. Tailscale is the sole route in and it is tailnet-scoped, so the map
+reaches your phone and never the public internet.
+
+A LaunchAgent lives in your login session, so it starts when you log in rather
+than at boot — after a restart the map comes back once you are logged in.
+
 ## Development
 
-No dependencies and no build — Node 24 runs the TypeScript directly. From a repo
-checkout:
+No dependencies and no build — Node 24 runs the TypeScript directly:
 
 ```sh
 just test
 ```
 
-Install it by cloning this repo to `~/Plow/skills/property-hunt` on the Mac; the
-guide above has the step. There is no installer binary — the agent runs the
-scripts from wherever the checkout sits.
+The transforms take their state as text, so a test can build a store inline; the
+CLI tests write it to a request file the way the agent does. A contract test
+fails the suite if a script imports `node:fs` at all: one line in
+`properties.ts` reads the request file, and no other script imports it — the
+tests do, to stage that file.
 
 ## License
 

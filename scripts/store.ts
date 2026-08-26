@@ -1,8 +1,10 @@
 // The store. `data.js` is the single source of truth AND the file the frontend
-// loads — a file:// page cannot fetch(), so anything else would need a derived
-// export that can silently go stale. This module is its only writer.
-import * as fs from 'node:fs';
-import * as path from 'node:path';
+// loads — a page served from disk cannot fetch(), so anything else would need a
+// derived export that can silently go stale.
+//
+// This module owns the store's SHAPE, not its storage. It parses text and
+// serializes rows; the agent does the reading and writing of `data.js`, on the
+// operator's Mac, through Latch.
 
 /** Scraped from a listing. Replaced wholesale on every re-scrape. */
 export type Scraped = {
@@ -173,38 +175,25 @@ export function parseStore(text: string): Property[] {
   return parsed as Property[];
 }
 
-export function dataFile(dir: string): string {
-  return path.join(dir, 'data.js');
-}
-
 /**
  * The one way to read the store, and the one place that says what to do when
- * there isn't one. Callers that need to fail before doing expensive work just
- * call this early — an existence-only preflight would let a *damaged* store
- * through and spend the browser run before failing anyway.
+ * the text is not one.
+ *
+ * Nothing here reaches for state. The agent writes what it read off the Mac
+ * into the request file, the caller passes those contents in, and
+ * `serializeStore` returns the text to write back.
+ * That removes the second copy of this code that used to sit on the Mac and
+ * drift from the pinned one — which it did, within a week.
+ *
+ * Blank input is refused rather than read as an empty store. The caller passes
+ * what it read, so blank means the read failed, and treating that as "no
+ * properties" would discard every one of them on the write that follows.
  */
-export function readStore(dir: string): Property[] {
-  const file = dataFile(dir);
-  if (!fs.existsSync(file)) {
-    // Deliberately not a command: the caller's cwd is unknown, and a
-    // cwd-relative "node properties.ts init" fails with MODULE_NOT_FOUND from
-    // anywhere but scripts/. SKILL.md carries the absolute invocation.
-    throw new Error(`no store at ${dir} — run the "First, always" init command in SKILL.md first`);
+export function loadStore(text: string): Property[] {
+  if (text.trim() === '') {
+    throw new Error('the store text is empty — pass the contents of data.js, not an empty string');
   }
-  return parseStore(fs.readFileSync(file, 'utf8'));
-}
-
-/**
- * Rename is atomic, so a reader never sees a half-written store — which matters
- * because the map may have the file open. This is not a concurrency lock: two
- * simultaneous writers would still lose one update. Nothing here writes
- * concurrently (one agent, one command at a time), so a lock would be cost
- * without benefit.
- */
-export function writeStore(dir: string, rows: Property[]): void {
-  const tmp = path.join(dir, `.data.js.tmp-${process.pid}`);
-  fs.writeFileSync(tmp, serializeStore(rows));
-  fs.renameSync(tmp, dataFile(dir));
+  return parseStore(text);
 }
 
 /** Create or refresh. Replaces `scraped` wholesale; preserves `mine` exactly. */

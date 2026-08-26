@@ -1,36 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import * as fs from 'node:fs';
-import * as os from 'node:os';
-import * as path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import { resolveDataDir } from './properties.ts';
-import { coerceScraped, readStore, upsertScraped, writeStore } from './store.ts';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { envelope, takeRequest } from './properties.ts';
+import { coerceScraped, emptyStoreText, loadStore, serializeStore, upsertScraped } from './store.ts';
 
 const CLI = fileURLToPath(new URL('./properties.ts', import.meta.url));
-
-function tmpdir(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'property-hunt-cli-'));
-}
-
-/**
- * Seed a property. scrape.ts owns adding in production (it scrapes and writes
- * in one step), so there is no CLI verb to seed through — tests use the same
- * store functions scrape.ts calls.
- */
-function seed(dir: string, over: Record<string, unknown> = {}): void {
-  writeStore(dir, upsertScraped(readStore(dir), coerceScraped({ ...LISTING, ...over })));
-}
-
-/** Run the CLI the way the agent will: as a subprocess against a real folder. */
-function run(dir: string, ...args: string[]): string {
-  return execFileSync(process.execPath, [CLI, ...args], {
-    env: { ...process.env, PROPERTY_HUNT_DIR: dir },
-    encoding: 'utf8',
-  });
-}
 
 const LISTING = {
   address: '424 28th Street',
@@ -48,90 +28,111 @@ const LISTING = {
   listing_url: 'https://www.compass.com/homedetails/424-28th-St-San-Francisco-CA-94131/1QUY9H_pid/',
 };
 
-test('the data folder honours an explicit override', () => {
-  assert.equal(resolveDataDir({ PROPERTY_HUNT_DIR: '/tmp/somewhere' } as NodeJS.ProcessEnv), '/tmp/somewhere');
+/** A store containing one property, as text — what the agent would pass. */
+function store(over: Record<string, unknown> = {}): string {
+  return serializeStore(upsertScraped(loadStore(emptyStoreText()), coerceScraped({ ...LISTING, ...over })));
+}
+
+/**
+ * Run the CLI the way the agent does: a real request file on disk.
+ *
+ * Executing it matters. A previous version of this suite asserted only that
+ * the flag was spelled right, and passed while every file-backed run failed —
+ * readFileSync without an encoding returns a Buffer, which has no .trim().
+ */
+function run(req: Record<string, unknown>): { out: string; err: string; code: number } {
+  const dir = mkdtempSync(join(tmpdir(), 'property-hunt-req-'));
+  const path = join(dir, 'request.json');
+  writeFileSync(path, JSON.stringify(req));
+  const r = spawnSync(process.execPath, [CLI, '--request', path], { encoding: 'utf8' });
+  return { out: r.stdout, err: r.stderr, code: r.status ?? 0 };
+}
+
+const ID = '424-28th-st-94131-ca';
+
+test('the request file carries everything, and a missing store is fatal', () => {
+  const req = takeRequest(['--request', '/x'], () => JSON.stringify({ verb: 'set', store: 'CONTENTS' }));
+  assert.equal(req.store, 'CONTENTS');
+  assert.equal(req.verb, 'set');
+  assert.throws(() => takeRequest(['--request', '/x'], () => '{"verb":"list"}'), /store/);
+  assert.throws(() => takeRequest([]), /--request/);
 });
 
-test('the default folder is the one the user opens in Finder', () => {
-  // One answer now, not two: the scripts run on the Mac under latch, so there
-  // is no agent-VM mount to prefer and no reason to accept either result.
-  assert.equal(resolveDataDir({} as NodeJS.ProcessEnv), path.join(os.homedir(), 'Plow', 'properties'));
+test('an envelope omits what there is nothing to do about', () => {
+  // Absence is the signal the agent branches on, so an empty array or a null
+  // would each be a second way of saying nothing — and one it might act on.
+  const parsed = JSON.parse(envelope({ store: 'x', id: 'a', verb: 'updated' }));
+  assert.deepEqual(Object.keys(parsed).sort(), ['id', 'store', 'verb']);
 });
 
-test('init scaffolds a folder the frontend can actually load', () => {
-  const dir = tmpdir();
-  run(dir, 'init');
-  for (const expected of ['data.js', 'index.html', 'photos', 'vendor']) {
-    assert.ok(fs.existsSync(path.join(dir, expected)), `init must produce ${expected}`);
+test('set prints the new store and touches no disk', () => {
+  const env = JSON.parse(run({ verb: 'set', id: ID, field: 'notes', value: 'a note', store: store() }).out);
+  assert.equal(env.verb, 'updated');
+  assert.equal(env.id, ID);
+  const rows = loadStore(env.store);
+  assert.equal(rows[0].mine.notes, 'a note');
+  assert.equal(rows[0].scraped.address, '424 28th Street', 'scraped is untouched by a mine edit');
+  assert.equal(env.fetch, undefined);
+});
+
+
+test('rm prints the new store and names the photo rather than deleting it', () => {
+  const env = JSON.parse(run({ verb: 'rm', id: ID, store: store({ photo: 'photos/x.jpg' }) }).out);
+  assert.equal(env.verb, 'removed');
+  assert.deepEqual(loadStore(env.store), []);
+  // Named, not unlinked: nothing in this process can reach the Mac.
+  assert.deepEqual(env.remove, ['photos/x.jpg']);
+});
+
+test('rm of a property with no photo asks for no deletion', () => {
+  assert.equal(JSON.parse(run({ verb: 'rm', id: ID, store: store() }).out).remove, undefined);
+});
+
+test('list and get read the store they are handed', () => {
+  assert.match(run({ verb: 'list', store: store() }).out, /424 28th/);
+  assert.equal(JSON.parse(run({ verb: 'get', id: ID, store: store() }).out).id, ID);
+  assert.equal(JSON.parse(run({ verb: 'list', json: true, store: store() }).out).length, 1);
+  assert.match(run({ verb: 'list', store: emptyStoreText() }).out, /no properties yet/);
+});
+
+test('every verb refuses to run without a store', () => {
+  // Defaulting to an empty store would print a valid-looking envelope whose
+  // write discards every property the operator has.
+  for (const verb of ['list', 'get', 'set', 'rm']) {
+    const { out, err, code } = run({ verb, id: ID, field: 'notes', value: 'x' } as never);
+    assert.notEqual(code, 0, `${verb} must exit non-zero`);
+    assert.match(err, /store/, `${verb} must say what is missing`);
+    assert.doesNotMatch(out, /"store"/, `${verb} must print no envelope`);
   }
-  assert.match(fs.readFileSync(path.join(dir, 'data.js'), 'utf8'), /^window\.PROPERTIES =/);
 });
 
-test('init never destroys properties already collected', () => {
-  const dir = tmpdir();
-  run(dir, 'init');
-  seed(dir);
-  run(dir, 'set', '424-28th-st-94131-ca', 'notes', 'keep me');
-
-  run(dir, 'init'); // e.g. after a skill upgrade
-
-  const after = JSON.parse(run(dir, 'list', '--json'));
-  assert.equal(after.length, 1);
-  assert.equal(after[0].mine.notes, 'keep me');
+test('a note survives the request file exactly as typed', () => {
+  // One table: both cases are the same contract — the value goes in as JSON,
+  // never as a shell word, so nothing in it is ever parsed as syntax.
+  for (const value of [
+    'needs a new roof',
+    "needs a roof, don't love the kitchen",
+    `'; touch /tmp/pwned; echo '$(whoami)` + '`id`' + ' "quoted" \\backslash',
+  ]) {
+    const env = JSON.parse(run({ verb: 'set', id: ID, field: 'notes', value, store: store() }).out);
+    assert.equal(loadStore(env.store)[0].mine.notes, value, JSON.stringify(value).slice(0, 40));
+  }
 });
 
-test('the add-then-annotate-then-refresh flow a user actually does', () => {
-  const dir = tmpdir();
-  run(dir, 'init');
-
-  seed(dir);
-
-  const id = '424-28th-st-94131-ca';
-  run(dir, 'set', id, 'rating', '4');
-  run(dir, 'set', id, 'notes', 'sweeping views, needs a new roof');
-  run(dir, 'set', id, 'status', 'toured');
-
-  // Price cut — the agent re-scrapes.
-  seed(dir, { price: 2950000 });
-
-  const [row] = JSON.parse(run(dir, 'list', '--json'));
-  assert.equal(row.scraped.price, 2950000);
-  assert.equal(row.mine.rating, 4);
-  assert.equal(row.mine.notes, 'sweeping views, needs a new roof');
-  assert.equal(row.mine.status, 'toured');
-
-  assert.match(run(dir, 'list'), /\n1 property\n/, 'one house is not "1 properties"');
+test('a blank store is refused rather than read as an empty store', () => {
+  const { err, code } = run({ verb: 'list', store: '' });
+  assert.notEqual(code, 0);
+  assert.match(err, /empty/i);
 });
 
-test('multi-word notes survive the shell without quoting gymnastics', () => {
-  const dir = tmpdir();
-  run(dir, 'init');
-  seed(dir);
-  run(dir, 'set', '424-28th-st-94131-ca', 'notes', 'needs', 'a', 'new', 'roof');
-  const [row] = JSON.parse(run(dir, 'list', '--json'));
-  assert.equal(row.mine.notes, 'needs a new roof');
-});
-
-test('operating on a store that does not exist yet says what to do', () => {
-  const dir = tmpdir();
-  assert.throws(() => run(dir, 'list'), /init/);
-});
-
-test('rm deletes the property and its photo', () => {
-  const dir = tmpdir();
-  run(dir, 'init');
-  seed(dir, { photo: 'photos/x.jpg' });
-  fs.writeFileSync(path.join(dir, 'photos', 'x.jpg'), 'jpegbytes');
-
-  run(dir, 'rm', '424-28th-st-94131-ca');
-
-  assert.deepEqual(JSON.parse(run(dir, 'list', '--json')), []);
-  assert.equal(fs.existsSync(path.join(dir, 'photos', 'x.jpg')), false, 'the photo is orphaned otherwise');
+test('init and where are no longer verbs', () => {
+  for (const verb of ['init', 'where']) {
+    assert.notEqual(run({ verb, store: store() }).code, 0, `${verb} is no longer a verb`);
+  }
 });
 
 test('an unknown id lists the ids that do exist', () => {
-  const dir = tmpdir();
-  run(dir, 'init');
-  seed(dir);
-  assert.throws(() => run(dir, 'get', 'wrong-house'), /424-28th-st-94131-ca/);
+  const { err } = run({ verb: 'set', id: 'no-such-house', field: 'rating', value: '4', store: store() });
+  assert.match(err, /no property with id/);
+  assert.match(err, new RegExp(ID));
 });
