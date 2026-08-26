@@ -286,11 +286,15 @@ test('the docs say how state reaches the scripts', () => {
   // unrelated steps, so a loose match ran green against the very paragraph
   // this exists to pin.
   const contract: Array<[string, RegExp]> = [
-    ['SKILL.md', /State arrives in the `--request` file[\s\S]{0,120}?JSON envelope/i],
-    ['README.md', /arrive in a request file[\s\S]{0,120}?comes out\s+on stdout/i],
+    ['SKILL.md', /State arrives in the `--request` file.{0,120}?JSON envelope/i],
+    ['README.md', /arrive in a request file.{0,120}?comes out on stdout/i],
   ];
   for (const [name, claim] of contract) {
-    const text = fs.readFileSync(path.join(BUNDLE, name), 'utf8');
+    // Whitespace-normalized: these paragraphs hard-wrap at ~78 columns, so
+    // adding a word upstream reflows them and would split a matched phrase
+    // across a newline — a red suite over a cosmetic edit, which is how a
+    // maintainer gets taught to loosen the regex instead of fixing the prose.
+    const text = fs.readFileSync(path.join(BUNDLE, name), 'utf8').replace(/\s+/g, ' ');
     assert.match(text, claim, `${name} must state the request-file contract where it describes the transport`);
   }
 });

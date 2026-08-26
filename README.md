@@ -23,7 +23,7 @@ No server. No API key. No account. No build step. Open the HTML file from Finder
 and it works — the map is [Leaflet](https://leafletjs.com), bundled, and your
 data is a plain JSON file the page loads directly.
 
-Four things do go out over the network, and nothing else: the listing lookup
+Four things go out to the public internet, and nothing else: the listing lookup
 itself, one download of that listing's photo from whatever host it lives on,
 one [Nominatim](https://nominatim.org) geocoding request per property to turn
 its address into a pin, and [OpenStreetMap](https://www.openstreetmap.org/copyright)
@@ -78,8 +78,8 @@ just test
 
 The transforms take their state as text, so a test can build a store inline; the
 CLI tests write it to a request file the way the agent does. A contract test
-fails the suite if a script writes, stats, or lists a directory — reading the
-request file is how state arrives.
+fails the suite if a script imports `node:fs` at all: one line in
+`properties.ts` reads the request file, and that is the only fs call here.
 
 ## License
 

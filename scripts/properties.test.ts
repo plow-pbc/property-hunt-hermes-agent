@@ -125,7 +125,7 @@ test('a blank store is refused rather than read as an empty store', () => {
   assert.match(err, /empty/i);
 });
 
-test('init and where are gone with the filesystem', () => {
+test('init and where are no longer verbs', () => {
   for (const verb of ['init', 'where']) {
     assert.notEqual(run({ verb, store: store() }).code, 0, `${verb} is no longer a verb`);
   }
