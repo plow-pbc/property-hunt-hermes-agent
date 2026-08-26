@@ -64,7 +64,7 @@ through it), and a Mac running Plow Latch.
 
 ```sh
 git clone https://github.com/plow-pbc/property-hunt-hermes-agent.git ~/services/property-hunt-hermes-agent
-agent-mgr register property ~/services/property-hunt-hermes-agent   # this path is what gets mounted
+agent-mgr register property ~/services/property-hunt-hermes-agent   # supplies ${AGENT_DIR}
 agent-mgr restore  property   # config, the Plow Chat plugin, and an empty dotenv
 
 # Now fill ~/.hermes-property/.env with DOMO_DEVICE_UID and DOMO_MCP_TOKEN,
@@ -80,14 +80,23 @@ agent-mgr sign-in    property   # one-time browser OAuth for this agent
 agent-mgr agent      property 'which houses have I saved?'   # a turn without the phone
 ```
 
-Register the checkout itself: the override mounts whatever directory that row
-names, so a wrong path is how the container ends up with no `scripts/`.
+Register the checkout itself: that row supplies `${AGENT_DIR}`, and the override
+mounts `${AGENT_DIR}/skill` from it. A wrong path is how the container ends up
+with no `skill/scripts/`.
 
-**Your credentials never live here.** They live in `~/.hermes-property/.env`,
-outside this repo — which matters more than usual, because this whole checkout
-is mounted into the agent's container. A stray `.env` beside these files would
-be mounted with them. `.gitignore` stops it reaching git; nothing stops it
-reaching the container.
+**Only `skill/` enters the container.** Everything else here — `agent.env`,
+`config.yaml`, `.env.example`, `tests/`, `.git` — stays outside it. That is
+deliberate: this agent reads attacker-controlled input by design (a listing
+page's own JSON-LD, a pasted URL, a texted screenshot) while holding a Latch
+credential to your Mac, so what is reachable from its skill directory is worth
+being narrow about.
+
+**Your credentials never live in either place.** They live in
+`~/.hermes-property/.env`. A stray `.env` at the root of this checkout would be
+outside the mount — but one inside `skill/` would not, which is what
+`test_nothing_credential_shaped_sits_inside_the_mount` exists to catch, walking
+the filesystem rather than git because an untracked file is mounted just the
+same.
 
 ### Deploying a change
 
@@ -96,10 +105,11 @@ cd ~/services/property-hunt-hermes-agent && git pull
 agent-mgr restore property && agent-mgr up property
 ```
 
-One recipe for every file here, deliberately. Only `scripts/` and
-`references/` are genuinely live — the agent execs those out of the mount each
-turn. Everything else is read once and held: `SKILL.md` and `config.yaml` at
-gateway start, `agent.env` and `compose.override.yml` when Compose renders. A
+One recipe for every file here, deliberately. Only `skill/scripts/` and
+`skill/references/` are genuinely live — the agent execs those out of the mount
+each turn. Everything else is read once and held: `skill/SKILL.md` and
+`config.yaml` at gateway start, `agent.env` and `compose.override.yml` when
+Compose renders. A
 `git pull` alone leaves a running agent on the old values with no error, and
 which files that applies to is not worth remembering when the full recipe costs
 a few seconds.

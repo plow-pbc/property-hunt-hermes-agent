@@ -192,3 +192,32 @@ def test_nothing_credential_shaped_sits_inside_the_mount():
              or f.name.endswith("auth.json") or f.name.endswith("auth.lock"))
     ]
     assert not offenders, f"credential-shaped files inside the mounted tree: {offenders}"
+
+
+def test_the_readme_names_the_mount_the_override_actually_makes():
+    """The runbook and the override have to agree on where the boundary is.
+
+    This moved twice in one branch -- whole checkout, then skill/ -- and the
+    README described the old one both times, telling operators a stray root
+    .env reached the container when it no longer did. That is worse than
+    silence: it is a credential-exposure model that is wrong in the reassuring
+    direction.
+
+    Pinned by VALUE, not by prose: the mount source is read out of the override
+    and asserted to appear in the README verbatim, the same way SKILL.md is
+    pinned to HARVEST_EXPRESSION. A scan for sentences about mounting would be
+    out-spelled the first time someone rephrased it.
+    """
+    mount = yaml.safe_load(
+        (ROOT / "compose.override.yml").read_text()
+    )["services"]["hermes"]["volumes"][0]
+    source, target, _ = mount.rsplit(":", 2)
+    # ${AGENT_DIR:?...} carries its own default text; the README names the
+    # bare variable and the subdirectory, which is the part an operator acts on.
+    subpath = source.split("}", 1)[1]
+    readme = (ROOT / "README.md").read_text()
+    assert f"${{AGENT_DIR}}{subpath}" in readme, (
+        f"the override mounts ${{AGENT_DIR}}{subpath}; the README does not say so"
+    )
+    assert target.rsplit("/", 1)[-1] in readme
+
