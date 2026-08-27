@@ -41,9 +41,9 @@ do** — do not invent an empty one.
 Plow Latch, which is how you reach the Mac. You need `plow_browser_open`,
 `plow_browser`, `plow_read_file`, `plow_write_file` and `plow_run_command`.
 
-Serving the map to a phone additionally needs a working `python3` and Tailscale
-on the Mac. Both are checked in that section before anything is installed, so
-nothing else here depends on them.
+The map's file server needs a working `python3` on the Mac. Putting that map on
+a phone additionally needs Tailscale. Both are checked in that section before
+anything is installed, so nothing else here depends on them.
 
 `plow_run_command` takes an **argv array and runs it directly — there is no
 shell**. `~` is never expanded, so use the real absolute path. Values are
@@ -85,7 +85,7 @@ Writing an empty store over it erases every house they have saved, and nothing
 here can get them back. Only when the read fails:
 
 ```json
-{ "path": "/Users/<user>/Plow/properties/data.js", "content": "window.PROPERTIES =\n[]\n" }
+{ "path": "/Users/<user>/Plow/properties/data.js", "content": "[]\n" }
 ```
 
 ## Adding a property
@@ -278,18 +278,31 @@ need one — a house hunt is a few dozen properties.
 
 ## The map
 
-`~/Plow/properties/index.html`. The user opens it from Finder. Each pin is the
+`http://127.0.0.1:8787/`, once the file server below is running. Each pin is the
 house's photo with its price and bed count, ringed by status; clicking one opens
 the listing.
 
-### Serving it to a phone
+**Never send the user to the file itself** — not the Finder path, not a
+`file://` URL. The page loads `data.js` and `vendor/leaflet.js` as separate
+files, and WebKit refuses to load a subresource from a `file://` page. The store
+never executes, so the map reports `Could not load data.js` and draws nothing.
+That is Safari and every browser built on it, which on a Mac is the default
+case. Chrome permits it — so testing there passes while the user still sees an
+empty page, and the fault reads as a damaged store rather than the wrong URL.
 
-The map is a file on the Mac, so a phone cannot open it directly. Put it on the
-user's tailnet — private, HTTPS, never the public internet.
+Serving the directory is what makes one URL work in every browser. Set it up on
+the first save, not when the user complains.
+
+### Serving the map
+
+Steps 1-5 stand up the local server, and **every** user needs them — that is the
+URL above. Step 6 additionally publishes it to the user's tailnet, which is what
+a phone needs: private, HTTPS, never the public internet.
 
 There is no checkout on the Mac, so you do this yourself rather than running a
-recipe there. It needs a working `python3` and Tailscale on the Mac; both are
-checked below before anything is installed.
+recipe there. Steps 1-5 need a working `python3`, checked below before anything
+is installed; Tailscale is found in step 6, so the desktop path never looks for
+it.
 
 **1. Check there is a map to serve.**
 
@@ -313,13 +326,7 @@ map goes blank while everything looks configured. Running it proves it works.
 **If this exits non-zero, stop** and tell the user to install Python or the
 Command Line Tools. Do not write a plist naming an interpreter that never ran.
 
-**3. Find Tailscale**, which may be the app bundle or the open-source CLI:
-
-```json
-{ "command": ["/bin/sh", "-lc", "command -v tailscale || echo /Applications/Tailscale.app/Contents/MacOS/Tailscale"] }
-```
-
-**4. Write the launchd job.** Read
+**3. Write the launchd job.** Read
 `references/launchd/co.plow.property-map.plist` from your own checkout,
 substitute `@PYTHON@` with step 2's output, `@PORT@` with `8787`, and `@DIR@`
 with `/Users/<user>/Plow/properties`, then:
@@ -328,7 +335,7 @@ with `/Users/<user>/Plow/properties`, then:
 { "path": "/Users/<user>/Library/LaunchAgents/co.plow.property-map.plist", "content": "<the substituted plist>" }
 ```
 
-**5. Load it.** Unload first so a re-run replaces the definition, and free the
+**4. Load it.** Unload first so a re-run replaces the definition, and free the
 port of anything that is not launchd — a second server would lose the bind and
 `KeepAlive` would respawn it forever:
 
@@ -341,17 +348,32 @@ the shell running it, so the shell kills itself and `launchctl load` never
 runs — and the failure only surfaces at the next step as an unexplained curl
 error.
 
-**6. Check that what answers is the map**, not some other service that happened
+**5. Check that what answers is the map**, not some other service that happened
 to hold the port. 8787 is not reserved, and publishing a stranger's service to
 the tailnet is worse than failing:
 
 ```json
-{ "command": ["/bin/sh", "-lc", "curl -fsS http://127.0.0.1:8787/data.js | head -c 40"], "network": true }
+{ "command": ["/bin/sh", "-lc", "curl -fsS http://127.0.0.1:8787/ | grep -q 'id=\"map\"' && curl -fsS http://127.0.0.1:8787/data.js | head -n 1 | grep -q '^\\[' && echo SERVING-THE-MAP"], "network": true }
 ```
 
-It must print `window.PROPERTIES =`. If it does not, stop — do not continue.
+It must print `SERVING-THE-MAP`. If it does not, stop — do not continue.
 
-**7. Publish it to the tailnet**, using the path step 3 printed:
+Two checks, and both match on **content rather than a byte offset**: the page
+served is this map, and the store beside it is a JSON array. A byte-prefix check
+here (`head -c 40` against a known marker) breaks the moment the file's opening
+bytes change, and then reports a correct server as a foreign one — which is
+worse than not checking, because the documented response is to abort setup.
+
+**6. Publish it to the tailnet — only when the user asks for it on their phone.**
+The desktop URL works without this step, so everything Tailscale lives here
+rather than on the path every user walks. Find it first — it may be the app
+bundle or the open-source CLI:
+
+```json
+{ "command": ["/bin/sh", "-lc", "command -v tailscale || echo /Applications/Tailscale.app/Contents/MacOS/Tailscale"] }
+```
+
+Then serve the port, using the path that printed:
 
 ```json
 { "command": ["<tailscale>", "serve", "--bg", "8787"], "network": true }

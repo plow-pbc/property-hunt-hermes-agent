@@ -124,7 +124,6 @@
 <div id="notices"></div>
 
 <script src="vendor/leaflet.js"></script>
-<script src="data.js"></script>
 <script>
 (function () {
   var STATUS_COLORS = {
@@ -169,18 +168,34 @@
     return parts.join('  ·  ');
   }
 
-  // A store that failed to load must say so — never a blank page.
-  if (typeof window.PROPERTIES === 'undefined') {
-    // Deliberately not "add a property and it will rebuild this": that is only
-    // true when the file is absent. If it exists but is damaged, init keeps it
-    // and every read fails the same way — so the honest ask is to look at it.
-    notice('<strong>Could not load data.js.</strong> The store is missing or damaged, so nothing can be shown. ' +
-           'Ask Plow to check it before adding anything else.', true);
-    return;
-  }
+  // Fetched, not included with <script src>. A classic include assigns a global,
+  // and any page the user visits can include this file cross-origin and read
+  // that global out of its own window — every address and private note in it.
+  // fetch is same-origin by default and the file server sends no CORS header,
+  // so the browser refuses a cross-origin read *outside* any code shipped here.
+  // An in-page origin check cannot do that: it runs in the including page's
+  // realm, where `document.currentScript` and `URL` are the attacker's to shadow.
+  //
+  // This is also why the page must be served rather than opened from disk: a
+  // file:// page cannot fetch(), which is what the <script src> shape was
+  // working around.
+  fetch('data.js')
+    .then(function (res) {
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.json();
+    })
+    .then(draw)
+    .catch(function () {
+      // A store that failed to load must say so — never a blank page.
+      // Deliberately not "add a property and it will rebuild this": that is only
+      // true when the file is absent. If it exists but is damaged, init keeps it
+      // and every read fails the same way — so the honest ask is to look at it.
+      notice('<strong>Could not load data.js.</strong> The store is missing or damaged, so nothing can be shown. ' +
+             'Ask Plow to check it before adding anything else.', true);
+    });
 
+  function draw(rows) {
   try {
-  var rows = window.PROPERTIES;
   var mapped = rows.filter(function (r) { return r.scraped.lat != null && r.scraped.lng != null; });
   var unmapped = rows.filter(function (r) { return r.scraped.lat == null || r.scraped.lng == null; });
 
@@ -285,6 +300,7 @@
     // One malformed row must not leave a blank page with no explanation.
     notice('<strong>Could not draw the map.</strong> data.js loaded but a property is malformed: ' +
            esc(String((err && err.message) || err)), true);
+  }
   }
 })();
 </script>
