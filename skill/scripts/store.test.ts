@@ -173,9 +173,21 @@ test('an empty store is a valid store', () => {
   assert.deepEqual(parseStore(emptyStoreText()), []);
 });
 
-test('the store file is loadable by a browser as a plain script', () => {
+test('the store file is plain JSON, assigning nothing', () => {
   const text = serializeStore(upsertScraped([], scraped()));
-  assert.match(text.split('\n')[0], /^window\.PROPERTIES =$/, 'the frontend loads this with <script src>, not fetch');
+  assert.doesNotThrow(() => JSON.parse(text), 'the frontend fetches this and calls .json() on it');
+  // The whole security property: included cross-origin as a classic script this
+  // evaluates to a discarded expression, so there is no global to read back.
+  assert.doesNotMatch(text, /window\.PROPERTIES/, 'assigning a global is what made the store cross-origin readable');
+});
+
+test('a store written before the JSON change still loads', () => {
+  // Those files are on disk and are irreplaceable, so read stays tolerant of the
+  // old header. Write is canonical, so the next save migrates them in place.
+  const rows = upsertScraped([], scraped());
+  const legacy = `window.PROPERTIES =\n${JSON.stringify(rows, null, 2)}\n`;
+  assert.deepEqual(parseStore(legacy), rows);
+  assert.doesNotMatch(serializeStore(parseStore(legacy)), /window\.PROPERTIES/, 'and comes back out canonical');
 });
 
 // --- Loud failure: the store is irreplaceable user data ---------------------

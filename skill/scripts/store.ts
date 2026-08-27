@@ -62,7 +62,19 @@ export function storableUrl(raw: unknown, base?: string): URL | null {
   return url.protocol === 'http:' || url.protocol === 'https:' ? url : null;
 }
 
-const HEADER = 'window.PROPERTIES =';
+// The store used to serialize as `window.PROPERTIES = [...]` so a page opened
+// from disk could load it with <script src>, because a file:// page cannot
+// fetch(). That shape assigns a global, which means any page the user visits
+// could include the store cross-origin and read their addresses and private
+// notes out of its own window. Serving the map over http removed the file://
+// constraint, so the store is plain JSON now and the page fetches it —
+// same-origin by default, with the refusal enforced by the browser rather than
+// by code running in the attacker's realm.
+//
+// Read stays tolerant of the old header for one reason: stores written before
+// this change are on disk and are irreplaceable. Write is canonical, so the
+// next save migrates a legacy store with no separate migration step.
+const LEGACY_HEADER = /^\s*window\.PROPERTIES\s*=/;
 
 // Street-type abbreviations, so "424 28th Street" and "424 28th St" are one house.
 const SUFFIXES: Record<string, string> = {
@@ -144,7 +156,7 @@ export function emptyStoreText(): string {
 }
 
 export function serializeStore(rows: Property[]): string {
-  return `${HEADER}\n${JSON.stringify(rows, null, 2)}\n`;
+  return `${JSON.stringify(rows, null, 2)}\n`;
 }
 
 /**
@@ -156,16 +168,11 @@ export function parseStore(text: string): Property[] {
   if (text.trim() === '') {
     throw new Error('data.js is empty — refusing to treat that as an empty store');
   }
-  const firstBreak = text.indexOf('\n');
-  const firstLine = firstBreak === -1 ? text : text.slice(0, firstBreak);
-  if (!firstLine.includes('window.PROPERTIES')) {
-    throw new Error(
-      `data.js is malformed: expected it to start with "${HEADER}", got ${JSON.stringify(firstLine.slice(0, 60))}`,
-    );
-  }
+  // A legacy store carries the assignment; a current one is JSON already.
+  const json = text.replace(LEGACY_HEADER, '');
   let parsed: unknown;
   try {
-    parsed = JSON.parse(text.slice(firstBreak + 1));
+    parsed = JSON.parse(json);
   } catch (err) {
     throw new Error(`data.js contains malformed JSON: ${(err as Error).message}`);
   }

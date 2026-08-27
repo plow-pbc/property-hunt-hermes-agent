@@ -85,7 +85,7 @@ Writing an empty store over it erases every house they have saved, and nothing
 here can get them back. Only when the read fails:
 
 ```json
-{ "path": "/Users/<user>/Plow/properties/data.js", "content": "window.PROPERTIES =\n[]\n" }
+{ "path": "/Users/<user>/Plow/properties/data.js", "content": "[]\n" }
 ```
 
 ## Adding a property
@@ -353,10 +353,16 @@ to hold the port. 8787 is not reserved, and publishing a stranger's service to
 the tailnet is worse than failing:
 
 ```json
-{ "command": ["/bin/sh", "-lc", "curl -fsS http://127.0.0.1:8787/data.js | head -c 40"], "network": true }
+{ "command": ["/bin/sh", "-lc", "curl -fsS http://127.0.0.1:8787/ | grep -q 'id=\"map\"' && curl -fsS http://127.0.0.1:8787/data.js | head -n 1 | grep -q '^\\[' && echo SERVING-THE-MAP"], "network": true }
 ```
 
-It must print `window.PROPERTIES =`. If it does not, stop — do not continue.
+It must print `SERVING-THE-MAP`. If it does not, stop — do not continue.
+
+Two checks, and both match on **content rather than a byte offset**: the page
+served is this map, and the store beside it is a JSON array. A byte-prefix check
+here (`head -c 40` against a known marker) breaks the moment the file's opening
+bytes change, and then reports a correct server as a foreign one — which is
+worse than not checking, because the documented response is to abort setup.
 
 **6. Publish it to the tailnet — only when the user asks for it on their phone.**
 The desktop URL works without this step, so everything Tailscale lives here
