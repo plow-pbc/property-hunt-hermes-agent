@@ -175,7 +175,12 @@ test('an empty store is a valid store', () => {
 
 test('the store file is loadable by a browser as a plain script', () => {
   const text = serializeStore(upsertScraped([], scraped()));
-  assert.match(text.split('\n')[0], /^window\.PROPERTIES =$/, 'the frontend loads this with <script src>, not fetch');
+  const [first, ...rest] = text.split('\n');
+  assert.match(first, /window\.PROPERTIES =$/, 'the frontend loads this with <script src>, not fetch');
+  // The guard rides the first line specifically so everything after it stays
+  // parseable as JSON. A footer would be trailing non-JSON and break parseStore.
+  assert.match(first, /document\.currentScript/, 'a cross-origin include must not reach the assignment');
+  assert.doesNotThrow(() => JSON.parse(rest.join('\n')), 'everything after line 1 is still pure JSON');
 });
 
 // --- Loud failure: the store is irreplaceable user data ---------------------

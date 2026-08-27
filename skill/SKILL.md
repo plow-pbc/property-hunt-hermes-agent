@@ -41,9 +41,9 @@ do** — do not invent an empty one.
 Plow Latch, which is how you reach the Mac. You need `plow_browser_open`,
 `plow_browser`, `plow_read_file`, `plow_write_file` and `plow_run_command`.
 
-Serving the map to a phone additionally needs a working `python3` and Tailscale
-on the Mac. Both are checked in that section before anything is installed, so
-nothing else here depends on them.
+The map's file server needs a working `python3` on the Mac. Putting that map on
+a phone additionally needs Tailscale. Both are checked in that section before
+anything is installed, so nothing else here depends on them.
 
 `plow_run_command` takes an **argv array and runs it directly — there is no
 shell**. `~` is never expanded, so use the real absolute path. Values are
@@ -295,13 +295,14 @@ the first save, not when the user complains.
 
 ### Serving the map
 
-Steps 1-6 stand up the local server, and **every** user needs them — that is the
-URL above. Step 7 additionally publishes it to the user's tailnet, which is what
+Steps 1-5 stand up the local server, and **every** user needs them — that is the
+URL above. Step 6 additionally publishes it to the user's tailnet, which is what
 a phone needs: private, HTTPS, never the public internet.
 
 There is no checkout on the Mac, so you do this yourself rather than running a
-recipe there. It needs a working `python3` and Tailscale on the Mac; both are
-checked below before anything is installed.
+recipe there. Steps 1-5 need a working `python3`, checked below before anything
+is installed; Tailscale is found in step 6, so the desktop path never looks for
+it.
 
 **1. Check there is a map to serve.**
 
@@ -325,13 +326,7 @@ map goes blank while everything looks configured. Running it proves it works.
 **If this exits non-zero, stop** and tell the user to install Python or the
 Command Line Tools. Do not write a plist naming an interpreter that never ran.
 
-**3. Find Tailscale**, which may be the app bundle or the open-source CLI:
-
-```json
-{ "command": ["/bin/sh", "-lc", "command -v tailscale || echo /Applications/Tailscale.app/Contents/MacOS/Tailscale"] }
-```
-
-**4. Write the launchd job.** Read
+**3. Write the launchd job.** Read
 `references/launchd/co.plow.property-map.plist` from your own checkout,
 substitute `@PYTHON@` with step 2's output, `@PORT@` with `8787`, and `@DIR@`
 with `/Users/<user>/Plow/properties`, then:
@@ -340,7 +335,7 @@ with `/Users/<user>/Plow/properties`, then:
 { "path": "/Users/<user>/Library/LaunchAgents/co.plow.property-map.plist", "content": "<the substituted plist>" }
 ```
 
-**5. Load it.** Unload first so a re-run replaces the definition, and free the
+**4. Load it.** Unload first so a re-run replaces the definition, and free the
 port of anything that is not launchd — a second server would lose the bind and
 `KeepAlive` would respawn it forever:
 
@@ -353,7 +348,7 @@ the shell running it, so the shell kills itself and `launchctl load` never
 runs — and the failure only surfaces at the next step as an unexplained curl
 error.
 
-**6. Check that what answers is the map**, not some other service that happened
+**5. Check that what answers is the map**, not some other service that happened
 to hold the port. 8787 is not reserved, and publishing a stranger's service to
 the tailnet is worse than failing:
 
@@ -363,8 +358,16 @@ the tailnet is worse than failing:
 
 It must print `window.PROPERTIES =`. If it does not, stop — do not continue.
 
-**7. Publish it to the tailnet — only when the user asks for it on their phone.**
-The desktop URL works without this step. Using the path step 3 printed:
+**6. Publish it to the tailnet — only when the user asks for it on their phone.**
+The desktop URL works without this step, so everything Tailscale lives here
+rather than on the path every user walks. Find it first — it may be the app
+bundle or the open-source CLI:
+
+```json
+{ "command": ["/bin/sh", "-lc", "command -v tailscale || echo /Applications/Tailscale.app/Contents/MacOS/Tailscale"] }
+```
+
+Then serve the port, using the path that printed:
 
 ```json
 { "command": ["<tailscale>", "serve", "--bg", "8787"], "network": true }

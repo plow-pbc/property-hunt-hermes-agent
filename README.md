@@ -1,8 +1,8 @@
 # property-hunt
 
 Text your agent a photo of a house for sale. It figures out which house, looks
-up everything the photo doesn't show, and puts it on a private map you can open
-from Finder.
+up everything the photo doesn't show, and puts it on a private map served on
+your own Mac at `http://127.0.0.1:8787/`.
 
 <!-- Runs on a Hermes agent through Plow Latch — https://howto.plow.co/property-hunt -->
 
@@ -13,15 +13,21 @@ from Finder.
   listing, and saves it.
 - **Talk to it normally.** *"The one on Elm — 3 stars, needs a new roof."*
   *"Mark Oak as passed."* *"Did the Greenwich place drop?"*
-- **Open the map.** `~/Plow/properties/index.html`. Every house is a pin showing
+- **Open the map.** `http://127.0.0.1:8787/`. Every house is a pin showing
   its photo, price, and bed count, coloured by whether you're interested, have
   toured it, or passed. Click one to open the listing.
 
 ## What it doesn't need
 
-No server. No API key. No account. No build step. Open the HTML file from Finder
-and it works — the map is [Leaflet](https://leafletjs.com), bundled, and your
-data is a plain JSON file the page loads directly.
+No API key. No account. No build step. No cloud: the map is
+[Leaflet](https://leafletjs.com), bundled, and your data is a plain file on your
+own disk.
+
+It does need a file server, and only because opening the page from Finder does
+not work. The map loads its store and Leaflet as separate files, and WebKit —
+Safari and everything built on it — refuses to load a subresource from a
+`file://` page, so the map comes up empty. The agent sets up a loopback-bound
+Python file server on the first save; nothing listens beyond your own machine.
 
 Four things go out to strangers, and nothing else: the listing lookup itself,
 one download of that listing's photo from whatever host it lives on, one
@@ -38,8 +44,9 @@ opens it.
 
 ## Requirements
 
-A Mac running [Plow Latch](https://github.com/plow-pbc/latch), and a Hermes
-agent you can text.
+A Mac running [Plow Latch](https://github.com/plow-pbc/latch), a working
+`python3` on it for the map's file server, and a Hermes agent you can text.
+Tailscale as well, but only if you want the map on your phone.
 
 **The Mac holds only Latch and your data.** These scripts run in the agent's
 container, out of this repo's own checkout, and own no state: the store and

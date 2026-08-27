@@ -62,7 +62,24 @@ export function storableUrl(raw: unknown, base?: string): URL | null {
   return url.protocol === 'http:' || url.protocol === 'https:' ? url : null;
 }
 
-const HEADER = 'window.PROPERTIES =';
+// The store is served as an executable script, so any page the user visits can
+// include it cross-origin and read the addresses and private notes out of its
+// own window. The server is loopback-bound, which stops the network but not the
+// user's own browser — that is the whole attack. So the file refuses to assign
+// unless the document including it shares its origin: same-origin on
+// `http://127.0.0.1:8787/` and over `tailscale serve`, refused from anywhere
+// else. `document.currentScript` is null under a module or `eval`, which is
+// also not a plain same-origin include — hence fail-closed on it.
+//
+// One line, and the throw rather than an `if` wrapper, because `parseStore`
+// reads the first line as the header and `JSON.parse`s the whole remainder. A
+// footer to close a block would be trailing non-JSON and break every read.
+const GUARD =
+  'if(!document.currentScript||new URL(document.currentScript.src,location.href).origin!==location.origin)' +
+  'throw new Error("data.js: refusing a cross-origin include");';
+/** What `parseStore` recognises a store by — the assignment, not the guard. */
+const MARKER = 'window.PROPERTIES =';
+const HEADER = `${GUARD} ${MARKER}`;
 
 // Street-type abbreviations, so "424 28th Street" and "424 28th St" are one house.
 const SUFFIXES: Record<string, string> = {
@@ -158,9 +175,9 @@ export function parseStore(text: string): Property[] {
   }
   const firstBreak = text.indexOf('\n');
   const firstLine = firstBreak === -1 ? text : text.slice(0, firstBreak);
-  if (!firstLine.includes('window.PROPERTIES')) {
+  if (!firstLine.includes(MARKER)) {
     throw new Error(
-      `data.js is malformed: expected it to start with "${HEADER}", got ${JSON.stringify(firstLine.slice(0, 60))}`,
+      `data.js is malformed: expected its first line to contain "${MARKER}", got ${JSON.stringify(firstLine.slice(0, 60))}`,
     );
   }
   let parsed: unknown;
