@@ -278,14 +278,26 @@ need one — a house hunt is a few dozen properties.
 
 ## The map
 
-`~/Plow/properties/index.html`. The user opens it from Finder. Each pin is the
+`http://127.0.0.1:8787/`, once the file server below is running. Each pin is the
 house's photo with its price and bed count, ringed by status; clicking one opens
 the listing.
 
-### Serving it to a phone
+**Never send the user to the file itself** — not the Finder path, not a
+`file://` URL. The page loads `data.js` and `vendor/leaflet.js` as separate
+files, and WebKit refuses to load a subresource from a `file://` page. The store
+never executes, so the map reports `Could not load data.js` and draws nothing.
+That is Safari and every browser built on it, which on a Mac is the default
+case. Chrome permits it — so testing there passes while the user still sees an
+empty page, and the fault reads as a damaged store rather than the wrong URL.
 
-The map is a file on the Mac, so a phone cannot open it directly. Put it on the
-user's tailnet — private, HTTPS, never the public internet.
+Serving the directory is what makes one URL work in every browser. Set it up on
+the first save, not when the user complains.
+
+### Serving the map
+
+Steps 1-6 stand up the local server, and **every** user needs them — that is the
+URL above. Step 7 additionally publishes it to the user's tailnet, which is what
+a phone needs: private, HTTPS, never the public internet.
 
 There is no checkout on the Mac, so you do this yourself rather than running a
 recipe there. It needs a working `python3` and Tailscale on the Mac; both are
@@ -351,7 +363,8 @@ the tailnet is worse than failing:
 
 It must print `window.PROPERTIES =`. If it does not, stop — do not continue.
 
-**7. Publish it to the tailnet**, using the path step 3 printed:
+**7. Publish it to the tailnet — only when the user asks for it on their phone.**
+The desktop URL works without this step. Using the path step 3 printed:
 
 ```json
 { "command": ["<tailscale>", "serve", "--bg", "8787"], "network": true }
