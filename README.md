@@ -107,8 +107,14 @@ container. Nothing enforces that for a file put inside `skill/` directly; don't.
 
 ```sh
 cd ~/services/property-hunt-hermes-agent && git pull
-agent-mgr restore property && agent-mgr up property
+AGENT_TRANSITION_ACK=1 agent-mgr restore property && AGENT_TRANSITION_ACK=1 agent-mgr up property
 ```
+
+Every transition here asks first: this agent serves a real person, and the
+gateway messages them at every restart, so `agent.env` declares an
+`AGENT_PRE_TRANSITION` guard that prompts `[y/N]` on a terminal and refuses
+non-interactively. `AGENT_TRANSITION_ACK=1` is the non-interactive
+acknowledgement — set it only when the restart is the point, as above.
 
 One recipe for every file here, deliberately. Only `skill/scripts/` and
 `skill/references/` are genuinely live — the agent execs those out of the mount
@@ -129,7 +135,8 @@ git -C ~/services/property-hunt-hermes-agent status --porcelain   # must be empt
 git -C ~/services/property-hunt-hermes-agent rev-parse HEAD
 ```
 
-`agent.env` declares nothing on purpose — see the comments in it.
+`agent.env` declares no identity on purpose — its one declaration is the
+transition guard above; see the comments in it.
 
 ## Your data
 
