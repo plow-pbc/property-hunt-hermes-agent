@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# This agent's veto on stopping or replacing its container.
+#
+# Declared as AGENT_PRE_TRANSITION in agent.env and invoked BY agent-mgr before
+# every transition -- `up`, `down`, `restart`, `restore`, and the reload that
+# follows a config write. Instances of this repo serve real external users, and
+# the gateway messages its person at every restart -- so a transition here is
+# user-visible, not an internal operation, and the operator has to say so on
+# purpose.
+#
+# Interactive: ask once, default No. Non-interactive (a deploy script, cron):
+# refuse unless AGENT_TRANSITION_ACK=1 is in the environment, so automation
+# opts in explicitly instead of messaging a person by accident.
+set -uo pipefail
+
+name="${AGENT_NAME:?run me through agent-mgr, which exports the name it resolved}"
+
+[ "${AGENT_TRANSITION_ACK:-}" = "1" ] && exit 0
+
+if [ -t 0 ]; then
+    printf '%s serves a REAL external user -- a restart sends them a message.\nContinue? [y/N] ' "$name" >&2
+    read -r reply
+    case "$reply" in
+        [yY]|[yY][eE][sS]) exit 0 ;;
+        *) echo "refused -- not transitioning ${name}" >&2; exit 1 ;;
+    esac
+fi
+
+echo "refusing non-interactively: ${name} serves a real external user and a restart messages them. Re-run from a terminal to confirm, or set AGENT_TRANSITION_ACK=1 to acknowledge." >&2
+exit 1

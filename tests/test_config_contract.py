@@ -17,6 +17,7 @@ construction, and `cp .env.example .env` lands there too -- so the guard was the
 belt after the braces.
 """
 
+import os
 from pathlib import Path
 
 import yaml
@@ -65,12 +66,44 @@ def test_the_descriptor_claims_no_identity():
 
     Per-person values that are not identity -- a different Mac, a different
     model -- go in ~/.hermes-<name>/.env and reach config.yaml as ${VAR}.
+
+    AGENT_PRE_TRANSITION is the one declaration allowed through: it is a repo
+    path resolved against each instance's own checkout, not identity, and it is
+    what warns the operator that a transition messages a real person.
     """
-    assert descriptor() == {}, (
-        f"agent.env declares {sorted(descriptor())}; every one of those is "
-        "derivable from the registry name, and declaring it stops a second "
+    assert set(descriptor()) == {"AGENT_PRE_TRANSITION"}, (
+        f"agent.env declares {sorted(descriptor())}; identity keys are "
+        "derivable from the registry name, and declaring one stops a second "
         "person from registering their own row against this repo"
     )
+
+
+def test_the_transition_guard_refuses_unless_acknowledged():
+    """A transition messages the real person this instance serves.
+
+    Behavior, not implementation: with no TTY (how CI and deploy scripts run
+    it), the guard refuses without AGENT_TRANSITION_ACK=1 and passes with it.
+    agent-mgr treats a non-zero exit as a veto, so refusal here is the warning
+    the operator sees.
+    """
+    import subprocess
+
+    guard = ROOT / descriptor()["AGENT_PRE_TRANSITION"]
+    assert guard.is_file() and os.access(guard, os.X_OK), (
+        "agent.env points AGENT_PRE_TRANSITION at a script that is missing or "
+        "not executable -- agent-mgr dies on that instead of asking"
+    )
+
+    env = {**os.environ, "AGENT_NAME": "mark-property"}
+    env.pop("AGENT_TRANSITION_ACK", None)
+    refused = subprocess.run([guard], env=env, stdin=subprocess.DEVNULL,
+                             capture_output=True, text=True)
+    assert refused.returncode == 1, refused.stderr
+    assert "real external user" in refused.stderr
+
+    acked = subprocess.run([guard], env={**env, "AGENT_TRANSITION_ACK": "1"},
+                           stdin=subprocess.DEVNULL, capture_output=True, text=True)
+    assert acked.returncode == 0, acked.stderr
 
 
 def test_the_config_sits_where_agent_mgr_looks_without_being_told():
