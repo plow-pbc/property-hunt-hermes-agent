@@ -18,8 +18,11 @@ belt after the braces.
 """
 
 import os
+import pty
+import subprocess
 from pathlib import Path
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -86,8 +89,6 @@ def test_the_transition_guard_refuses_unless_acknowledged():
     agent-mgr treats a non-zero exit as a veto, so refusal here is the warning
     the operator sees.
     """
-    import subprocess
-
     guard = ROOT / descriptor()["AGENT_PRE_TRANSITION"]
     assert guard.is_file() and os.access(guard, os.X_OK), (
         "agent.env points AGENT_PRE_TRANSITION at a script that is missing or "
@@ -104,6 +105,31 @@ def test_the_transition_guard_refuses_unless_acknowledged():
     acked = subprocess.run([guard], env={**env, "AGENT_TRANSITION_ACK": "1"},
                            stdin=subprocess.DEVNULL, capture_output=True, text=True)
     assert acked.returncode == 0, acked.stderr
+
+
+@pytest.mark.parametrize("reply,expected", [
+    ("y", 0), ("Y", 0), ("yes", 0),
+    ("n", 1), ("", 1), ("wat", 1),
+])
+def test_the_interactive_prompt_defaults_to_no(reply, expected):
+    """On a TTY the guard asks, and only an explicit yes proceeds.
+
+    A real pty, because [ -t 0 ] is the branch under test -- piped stdin
+    exercises the non-interactive refusal instead. Empty and garbage replies
+    must refuse: the default answer to "message a real person?" is No.
+    """
+    guard = ROOT / descriptor()["AGENT_PRE_TRANSITION"]
+    env = {**os.environ, "AGENT_NAME": "mark-property"}
+    env.pop("AGENT_TRANSITION_ACK", None)
+    master, slave = pty.openpty()
+    try:
+        os.write(master, (reply + "\n").encode())
+        proc = subprocess.run([guard], env=env, stdin=slave,
+                              capture_output=True, text=True)
+    finally:
+        os.close(master)
+        os.close(slave)
+    assert proc.returncode == expected, (reply, proc.stderr)
 
 
 def test_the_config_sits_where_agent_mgr_looks_without_being_told():
