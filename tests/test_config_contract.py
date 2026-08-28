@@ -65,10 +65,15 @@ def test_the_descriptor_claims_no_identity():
 
     Per-person values that are not identity -- a different Mac, a different
     model -- go in ~/.hermes-<name>/.env and reach config.yaml as ${VAR}.
+
+    AGENT_EXTERNAL_USER is the one declaration allowed through: it is a
+    property of every instance of this repo, not of a person -- a real
+    external user sits behind each one, so agent-mgr asks before any
+    transition (the mechanism lives there, this repo only declares the fact).
     """
-    assert descriptor() == {}, (
-        f"agent.env declares {sorted(descriptor())}; every one of those is "
-        "derivable from the registry name, and declaring it stops a second "
+    assert descriptor() == {"AGENT_EXTERNAL_USER": "1"}, (
+        f"agent.env declares {sorted(descriptor())}; identity keys are "
+        "derivable from the registry name, and declaring one stops a second "
         "person from registering their own row against this repo"
     )
 
