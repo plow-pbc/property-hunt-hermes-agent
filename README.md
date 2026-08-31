@@ -66,16 +66,16 @@ which person it serves, so a second operator registers their own row against
 their own checkout and gets their own home, container and project.
 
 You need [`agent-mgr`](https://github.com/plow-pbc/agent-mgr), a Docker daemon,
-`gh` authenticated (`gh auth status` — `restore` fetches the Plow Chat plugin
+`gh` authenticated (`gh auth status` — `deploy` fetches the Plow Chat plugin
 through it), and a Mac running Plow Latch.
 
 ```sh
 git clone https://github.com/plow-pbc/property-hunt-hermes-agent.git ~/services/property-hunt-hermes-agent
 agent-mgr register property ~/services/property-hunt-hermes-agent   # supplies ${AGENT_DIR}
-agent-mgr restore  property   # config, the Plow Chat plugin, and an empty dotenv
+agent-mgr deploy  property   # config, the Plow Chat plugin, and an empty dotenv
 
 # Now fill ~/.hermes-property/.env with DOMO_DEVICE_UID and DOMO_MCP_TOKEN,
-# minted from the Mac running Latch — see .env.example for how. `restore` only
+# minted from the Mac running Latch — see .env.example for how. `deploy` only
 # lays down the empty skeleton and never overwrites it, and config.yaml reads
 # both as ${VAR} at runtime, so an unfilled pair authenticates as nothing
 # rather than failing loudly.
@@ -107,7 +107,7 @@ container. Nothing enforces that for a file put inside `skill/` directly; don't.
 
 ```sh
 cd ~/services/property-hunt-hermes-agent && git pull
-AGENT_TRANSITION_ACK=1 agent-mgr restore property && AGENT_TRANSITION_ACK=1 agent-mgr up property
+AGENT_TRANSITION_ACK=1 agent-mgr deploy property && AGENT_TRANSITION_ACK=1 agent-mgr up property
 ```
 
 Every transition here asks first: `agent.env` declares `AGENT_LIVE=1`
