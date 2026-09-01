@@ -170,6 +170,10 @@ def test_the_hook_seeds_once_and_never_clobbers_the_agents_copy():
     """
     with tempfile.TemporaryDirectory() as home:
         env = {"AGENT_HOME": home, "PATH": "/usr/bin:/bin"}
+        # The retired :ro mount left a bare mountpoint dir in migrated homes;
+        # seeding must treat that empty dir as absent (it ate mark-property's
+        # first real deploy), so the first run starts from exactly that state.
+        (Path(home) / "skills" / "productivity" / "property-hunt").mkdir(parents=True)
         first = subprocess.run(["./deploy-hook"], cwd=ROOT, env=env, capture_output=True, text=True)
         assert first.returncode == 0, first.stderr
         seeded = Path(home) / "skills" / "productivity" / "property-hunt"
