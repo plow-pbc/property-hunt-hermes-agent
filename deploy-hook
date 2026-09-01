@@ -1,5 +1,6 @@
 #!/bin/sh
-# Seed skill/ into the agent's home -- copy-if-absent, never clobber.
+# Seed skill/ into the agent's home -- copy if absent or empty, never
+# overwrite a non-empty agent-owned copy.
 #
 # The skill used to be bind-mounted :ro from this checkout, which meant the
 # agent could not edit it: every skill_manage write died with EROFS. The agent
@@ -18,8 +19,9 @@ dest="${AGENT_HOME:?agent-mgr exports this}/skills/productivity/property-hunt"
 # An EMPTY dir is absent, not the agent's copy: the retired :ro mount left its
 # bare mountpoint dir behind in every migrated home, and skipping on it means
 # the seed never fires for exactly the agents this hook replaced the mount for.
-if [ -e "$dest" ] && [ -n "$(ls -A "$dest" 2>/dev/null)" ]; then exit 0; fi
-rm -rf "$dest"
+# rmdir encodes that state directly -- it removes only an empty dir, and a
+# non-empty (agent-owned) one makes it fail, which is the keep signal.
+[ ! -e "$dest" ] || rmdir "$dest" 2>/dev/null || exit 0
 # Stage beside the destination and rename into place, the same shape agent-mgr's
 # fetch-tree uses: an interrupted copy leaves *.incoming, never a half skill
 # that a later deploy would mistake for the agent's copy.

@@ -89,7 +89,8 @@ agent-mgr agent      property 'which houses have I saved?'   # a turn without th
 
 Register the checkout itself: that row supplies the checkout path, and
 `deploy` runs this repo's `deploy-hook`, which seeds `skill/` into the agent's
-home at `skills/productivity/property-hunt` — copy-if-absent. The home copy is
+home at `skills/productivity/property-hunt` — copied when absent or empty,
+never over a non-empty agent-owned copy. The home copy is
 the one the agent runs, and it is writable: the agent edits and improves its
 own skill there, the same way it manages skills it authors itself, so drifting
 from this checkout is normal. A later deploy never overwrites it; re-seeding
