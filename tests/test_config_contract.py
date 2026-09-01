@@ -155,46 +155,33 @@ def test_the_skill_is_seeded_writable_not_mounted_read_only():
 
 
 def test_the_hook_seeds_once_and_never_clobbers_the_agents_copy():
-    """First run copies the full tree; a second run leaves the agent's edits.
+    """First run copies what the instructions call and nothing else; a second
+    run leaves the agent's edits.
 
-    Both halves matter. The full tree, because the skill was once pinned and
-    fetched from a second repo and the installer delivered SKILL.md alone,
-    dropping the scripts/ and references/ the instructions call. Never-clobber,
-    because the home copy is the agent's -- its edits are the point of seeding
-    instead of mounting.
+    All three halves are asserted against the SEEDED OUTPUT, not the source
+    layout, so there is one description to keep true. The full tree, because
+    the skill was once pinned and fetched from a second repo and the installer
+    delivered SKILL.md alone, dropping the scripts/ and references/ the
+    instructions call. The deployment half absent, because the descriptor, the
+    config and the tests must stay outside the agent's reach -- the obvious
+    `cp .env.example .env` lands at the root, which is never seeded.
+    Never-clobber, because the home copy is the agent's -- its edits are the
+    point of seeding instead of mounting.
     """
     with tempfile.TemporaryDirectory() as home:
         env = {"AGENT_HOME": home, "PATH": "/usr/bin:/bin"}
         first = subprocess.run(["./deploy-hook"], cwd=ROOT, env=env, capture_output=True, text=True)
         assert first.returncode == 0, first.stderr
         seeded = Path(home) / "skills" / "productivity" / "property-hunt"
-        for needed in ("SKILL.md", "scripts/properties.ts", "scripts/scrape.ts", "references"):
+        text = (seeded / "SKILL.md").read_text()
+        assert "scripts/properties.ts" in text and "scripts/scrape.ts" in text
+        for needed in ("scripts/properties.ts", "scripts/scrape.ts", "references"):
             assert (seeded / needed).exists(), f"the seed carried no {needed}"
+        for outside in ("agent.env", "config.yaml", ".env.example", "deploy-hook", "tests"):
+            assert not (seeded / outside).exists(), f"{outside} is inside the seeded tree"
         (seeded / "SKILL.md").write_text("the agent's edit")
         second = subprocess.run(["./deploy-hook"], cwd=ROOT, env=env, capture_output=True, text=True)
         assert second.returncode == 0, second.stderr
         assert (seeded / "SKILL.md").read_text() == "the agent's edit", (
             "a redeploy overwrote the agent's copy"
         )
-        assert "differs" in second.stdout, "drift between seed and home copy went unreported"
-
-
-def test_the_seeded_tree_carries_what_the_instructions_call():
-    """SKILL.md's commands are relative to the skill directory, which is skill/."""
-    skill_dir = ROOT / "skill"
-    text = (skill_dir / "SKILL.md").read_text()
-    assert "scripts/properties.ts" in text and "scripts/scrape.ts" in text
-    for needed in ("scripts/properties.ts", "scripts/scrape.ts", "references"):
-        assert (skill_dir / needed).exists(), f"the seed would carry no {needed}"
-
-
-def test_the_deployment_half_stays_out_of_the_seed():
-    """What the agent can read is skill/, and these are deliberately not in it.
-
-    The hook copies skill/ alone, so the descriptor, the config and the tests
-    stay outside the agent's reach -- the obvious `cp .env.example .env` lands
-    at the root, which is never seeded.
-    """
-    for outside in ("agent.env", "config.yaml", ".env.example", "deploy-hook", "tests"):
-        assert (ROOT / outside).exists(), f"{outside} moved -- is it inside the seed now?"
-        assert not (ROOT / "skill" / outside).exists(), f"{outside} is inside the seeded tree"

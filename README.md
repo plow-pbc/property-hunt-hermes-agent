@@ -49,7 +49,7 @@ A Mac running [Plow Latch](https://github.com/plow-pbc/latch), a working
 Tailscale as well, but only if you want the map on your phone.
 
 **The Mac holds only Latch and your data.** These scripts run in the agent's
-container, out of this repo's own checkout, and own no state: the store and
+container, out of the seeded home copy of `skill/`, and own no state: the store and
 the harvest payload arrive in a request file the agent writes, and the new
 store comes out on stdout. The agent reads `data.js` off the Mac through Latch, runs the
 transform, and writes the result back. Nothing here is installed on the Mac, so
@@ -91,9 +91,9 @@ Register the checkout itself: that row supplies the checkout path, and
 `deploy` runs this repo's `deploy-hook`, which seeds `skill/` into the agent's
 home at `skills/productivity/property-hunt` — copy-if-absent. The home copy is
 the one the agent runs, and it is writable: the agent edits and improves its
-own skill there, the same way it manages skills it authors itself. A later
-deploy never overwrites it; if the checkout and the home copy have drifted the
-hook says so, and re-seeding is deliberate (remove the home copy, deploy again).
+own skill there, the same way it manages skills it authors itself, so drifting
+from this checkout is normal. A later deploy never overwrites it; re-seeding
+is deliberate (remove the home copy, deploy again).
 
 **Only `skill/` is seeded.** Everything else here — `agent.env`, `config.yaml`,
 `.env.example`, `tests/`, `.git` — stays outside the agent's reach. That is
@@ -127,8 +127,7 @@ running agent on the old values with no error.
 **A pull does not update a seeded skill.** The agent's home copy is its own —
 that is the point — so a skill change in this repo reaches an existing agent
 only when someone re-seeds deliberately (remove the home copy, deploy again)
-or hands the change to the agent to apply itself. The deploy prints a drift
-notice when the checkout and the home copy differ.
+or hands the change to the agent to apply itself.
 
 `agent.env` declares no identity on purpose — its declarations are
 `AGENT_LIVE=1` above and `AGENT_DEPLOY_HOOK=deploy-hook`; see the comments in it.
