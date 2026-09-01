@@ -13,8 +13,8 @@ from their Mac or their phone.
 
 **You hold the logic. The Mac holds the data.** The scripts run here, in your
 container, out of this skill's own directory — `SKILL.md`, `scripts/` and
-`references/` are one mounted tree, so what you read and what you run are the
-same version. `~/Plow/properties/` on the Mac holds
+`references/` are one seeded tree in your writable skill store, so what you
+read, what you run, and what you edit are the same copy. `~/Plow/properties/` on the Mac holds
 `data.js`, the map, and the photos — and nothing else. There is no copy of
 these scripts on the Mac to fall out of step with you.
 
@@ -52,7 +52,7 @@ separate array elements; never build one string out of them.
 ## First time only
 
 Create the folder and put the map there. `index.html` and the Leaflet files are
-text, so you write them yourself — read each from your own checkout and write
+text, so you write them yourself — read each from your own skill directory and write
 it across.
 
 ```json
@@ -62,7 +62,7 @@ it across.
 ```
 
 Then `plow_write_file` each of these, from `references/frontend/` in your
-checkout to `~/Plow/properties/`:
+skill directory to `~/Plow/properties/`:
 
 | from | to |
 |---|---|
@@ -299,7 +299,7 @@ Steps 1-5 stand up the local server, and **every** user needs them — that is t
 URL above. Step 6 additionally publishes it to the user's tailnet, which is what
 a phone needs: private, HTTPS, never the public internet.
 
-There is no checkout on the Mac, so you do this yourself rather than running a
+There is no copy of this skill on the Mac, so you do this yourself rather than running a
 recipe there. Steps 1-5 need a working `python3`, checked below before anything
 is installed; Tailscale is found in step 6, so the desktop path never looks for
 it.
@@ -327,7 +327,7 @@ map goes blank while everything looks configured. Running it proves it works.
 Command Line Tools. Do not write a plist naming an interpreter that never ran.
 
 **3. Write the launchd job.** Read
-`references/launchd/co.plow.property-map.plist` from your own checkout,
+`references/launchd/co.plow.property-map.plist` from your own skill directory,
 substitute `@PYTHON@` with step 2's output, `@PORT@` with `8787`, and `@DIR@`
 with `/Users/<user>/Plow/properties`, then:
 

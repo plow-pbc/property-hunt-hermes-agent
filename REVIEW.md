@@ -30,17 +30,21 @@ Flag drift between that prose and the code, in either direction.
 **Stage:** prototype, not shipped, no dates. Two house hunts.
 
 **Execution model:** the scripts run in the agent's container, out of a
-**read-only** mount of `skill/`. Node 24 runs the TypeScript directly — no
-build, no dependencies, and that is a deliberate constraint rather than an
-unfinished one. The Mac holds only Latch and the user's data; there is no copy
-of these scripts on it to fall out of step.
+**writable seeded copy** of `skill/` in the agent's home — `deploy-hook` seeds
+it copy-if-absent, the agent owns and edits it from then on, and divergence
+from this checkout is normal. Node 24 runs the TypeScript directly — no build,
+no dependencies, and that is a deliberate constraint rather than an unfinished
+one. The Mac holds only Latch and the user's data; there is no copy of these
+scripts on it to fall out of step.
 
 **Trust boundary (known and accepted):** this agent reads attacker-controlled
 input by design — a listing page's own JSON-LD, a pasted URL, a texted
 screenshot — while holding a Latch credential that drives the user's Mac. That
-is why only `skill/` is mounted, why nothing untrusted may become a shell word,
-and why the mount is read-only. Latch authorises each action on the Mac, so the
-approval surface stays there.
+is why only `skill/` is seeded and why nothing untrusted may become a shell
+word. The seeded copy being writable is a deliberate operator decision — the
+agent improving its own skill outweighs the persistence surface it opens, and
+that trade is accepted, not an oversight to re-flag. Latch authorises each
+action on the Mac, so the approval surface stays there.
 
 **The frontend is deployed by copy.** `references/frontend/` is the source;
 `~/Plow/properties/index.html` and `vendor/` are deployed artifacts of it. They
@@ -70,7 +74,7 @@ tracking it. Anything that reopens that path is blocking.
 |---|---|
 | Ask for a `try`/`catch` around a store read, or a fallback to an empty store. Throwing is the design — the store is irreplaceable and a silent reset destroys a house hunt no backup covers. | Flag a path that **writes the store without going through the scripts**, or an envelope key invented when it was absent. `store` is the exact text to write back; a hand-assembled one is how a field gets dropped from every row at once. One path is exempt: first-run seeding of an empty store after a **confirmed `ENOENT`** (`SKILL.md` § First time only). The exemption stops there — seeding on a *generic* read failure is itself a finding, and a blocking one, because a transient relay or permissions error against a real `data.js` then writes `[]` over a house hunt nothing can rebuild. `plow_read_file` reports `ENOENT` distinguishably, so "the read failed" is never sufficient. Exempt rather than exemplary in any case: the seed hand-types the file format a second time, so seeding from `emptyStoreText()` would retire the exemption along with the drift. |
 | Ask for auth on the map's file server. It is loopback-bound and the user is the only principal on that machine. | Flag the store becoming **readable by a page the user did not open**. It is served as an executable script, so a cross-origin `<script src>` reads addresses and notes out of the including page's window — loopback binding stops the network, not the user's own browser. |
-| Propose a bundler, a dependency manifest, or a CDN for Leaflet. No build and no third party are both deliberate. | Flag a **new runtime dependency** reaching the container or the Mac. The mount is read-only and the Mac holds no copy of this code; anything that needs installing on either side breaks the property that they cannot drift. |
+| Propose a bundler, a dependency manifest, or a CDN for Leaflet. No build and no third party are both deliberate. | Flag a **new runtime dependency** reaching the container or the Mac. The seeded skill ships self-contained and the Mac holds no copy of this code; anything that needs installing on either side breaks that. |
 | Ask a test to pin a photo filename or a slug's exact spelling beyond the cases already covered. | Flag a **path that can leave its directory**. Photos are joined onto `photos/` and the store onto the properties folder; a traversing component aims a write at the user's home. Reject by component, not substring. |
 | Treat doc-only edits as low-value churn. | Flag **prose↔code drift, in every copy**. The user-facing contract is stated in `README.md` *and* `skill/SKILL.md`; a change that fixes one and leaves the other is the canonical regression here, and the stale copy is the one users actually follow. |
 | — | Flag **any untrusted value reaching a shell word**. The harvest payload, the store, and the URL are all attacker-influenced, and `plow_run_command` takes argv precisely so none of them is parsed. A value pasted into a command string is blocking however it is quoted. |
