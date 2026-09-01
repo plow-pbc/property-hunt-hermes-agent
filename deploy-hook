@@ -9,8 +9,11 @@
 # agent's, edits and all; a deploy reports drift instead of overwriting it.
 # To force a re-seed, remove the home copy and deploy again.
 #
-# agent-mgr runs this with the checkout as cwd and AGENT_HOME exported.
+# agent-mgr exports AGENT_HOME; cwd is not assumed -- the script finds skill/
+# beside itself, and a checkout without one is broken, not drifted.
 set -eu
+cd "$(dirname "$0")"
+[ -d skill ] || { echo "property-hunt: no skill/ beside deploy-hook -- broken checkout" >&2; exit 1; }
 dest="${AGENT_HOME:?agent-mgr exports this}/skills/productivity/property-hunt"
 if [ -e "$dest" ]; then
   if ! diff -rq skill "$dest" >/dev/null 2>&1; then
@@ -18,6 +21,11 @@ if [ -e "$dest" ]; then
   fi
   exit 0
 fi
+# Stage beside the destination and rename into place, the same shape agent-mgr's
+# fetch-tree uses: an interrupted copy leaves *.incoming, never a half skill
+# that a later deploy would mistake for the agent's copy.
 mkdir -p "$(dirname "$dest")"
-cp -R skill "$dest"
+rm -rf "$dest.incoming"
+cp -R skill "$dest.incoming"
+mv "$dest.incoming" "$dest"
 echo "property-hunt: seeded skill into $dest"
