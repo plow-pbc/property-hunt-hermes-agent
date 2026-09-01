@@ -15,7 +15,11 @@ set -eu
 cd "$(dirname "$0")"
 [ -d skill ] || { echo "property-hunt: no skill/ beside deploy-hook -- broken checkout" >&2; exit 1; }
 dest="${AGENT_HOME:?agent-mgr exports this}/skills/productivity/property-hunt"
-[ -e "$dest" ] && exit 0
+# An EMPTY dir is absent, not the agent's copy: the retired :ro mount left its
+# bare mountpoint dir behind in every migrated home, and skipping on it means
+# the seed never fires for exactly the agents this hook replaced the mount for.
+if [ -e "$dest" ] && [ -n "$(ls -A "$dest" 2>/dev/null)" ]; then exit 0; fi
+rm -rf "$dest"
 # Stage beside the destination and rename into place, the same shape agent-mgr's
 # fetch-tree uses: an interrupted copy leaves *.incoming, never a half skill
 # that a later deploy would mistake for the agent's copy.
