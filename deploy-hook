@@ -1,0 +1,23 @@
+#!/bin/sh
+# Seed skill/ into the agent's home -- copy-if-absent, never clobber.
+#
+# The skill used to be bind-mounted :ro from this checkout, which meant the
+# agent could not edit it: every skill_manage write died with EROFS. The agent
+# is meant to improve its own skill, so the home copy -- the same writable
+# store where it keeps skills it authors itself -- is the one it runs, and this
+# checkout is only the seed. If the destination already exists it is the
+# agent's, edits and all; a deploy reports drift instead of overwriting it.
+# To force a re-seed, remove the home copy and deploy again.
+#
+# agent-mgr runs this with the checkout as cwd and AGENT_HOME exported.
+set -eu
+dest="${AGENT_HOME:?agent-mgr exports this}/skills/productivity/property-hunt"
+if [ -e "$dest" ]; then
+  if ! diff -rq skill "$dest" >/dev/null 2>&1; then
+    echo "property-hunt: $dest differs from this checkout's skill/ -- the agent's copy stays; remove it and redeploy to re-seed"
+  fi
+  exit 0
+fi
+mkdir -p "$(dirname "$dest")"
+cp -R skill "$dest"
+echo "property-hunt: seeded skill into $dest"

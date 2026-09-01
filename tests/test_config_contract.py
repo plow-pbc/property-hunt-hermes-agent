@@ -5,18 +5,20 @@ through compose, no recipe starting a second gateway -- moved to agent-mgr with
 the deployment, and are asserted there once for every agent instead of restated
 per repo. What is left here is what this repo says about the deployment it now carries
 alongside the skill: that the descriptor claims no identity of its own, that the
-shipped config takes its credentials from the environment, and that the mount
-hands the agent the skill and nothing else.
+shipped config takes its credentials from the environment, and that the deploy
+hook seeds the agent the skill and nothing else.
 
 Direct assertions about known files, not scans for credential-shaped things.
 Three filename or token-name heuristics lived here across this branch and all
 three went: each needed exemptions, each had a blind spot, and the last was
-defending ground the mount boundary had already taken. Credentials sit outside
+defending ground the skill boundary had already taken. Credentials sit outside
 `skill/` structurally -- `agent.env` and `.env.example` are at the root by
 construction, and `cp .env.example .env` lands there too -- so the guard was the
 belt after the braces.
 """
 
+import subprocess
+import tempfile
 from pathlib import Path
 
 import yaml
@@ -66,12 +68,14 @@ def test_the_descriptor_claims_no_identity():
     Per-person values that are not identity -- a different Mac, a different
     model -- go in ~/.hermes-<name>/.env and reach config.yaml as ${VAR}.
 
-    AGENT_LIVE is the one declaration allowed through: it is a property of
-    every instance of this repo, not of a person -- real people's workflows
-    run through each one, so agent-mgr asks before any transition (the
-    mechanism lives there, this repo only declares the fact).
+    AGENT_LIVE and AGENT_DEPLOY_HOOK are the declarations allowed through:
+    both are properties of every instance of this repo, not of a person.
+    AGENT_LIVE because real people's workflows run through each one, so
+    agent-mgr asks before any transition; AGENT_DEPLOY_HOOK because it is a
+    repo-relative path that agent-mgr resolves against each instance's own
+    checkout.
     """
-    assert descriptor() == {"AGENT_LIVE": "1"}, (
+    assert descriptor() == {"AGENT_LIVE": "1", "AGENT_DEPLOY_HOOK": "deploy-hook"}, (
         f"agent.env declares {sorted(descriptor())}; identity keys are "
         "derivable from the registry name, and declaring one stops a second "
         "person from registering their own row against this repo"
@@ -124,68 +128,73 @@ def test_the_dotenv_example_carries_no_values():
         assert value == "", f".env.example carries a value for {key}"
 
 
-def test_the_override_adds_exactly_one_read_only_skill_mount():
-    """The skill is mounted from this checkout, not fetched into the home.
+def test_the_skill_is_seeded_writable_not_mounted_read_only():
+    """The deploy hook copies skill/ into the agent's home; there is no mount.
 
-    It used to be pinned by SHA and pulled from a second repo, and that is what
-    made a half-delivery possible: the installer fetched SKILL.md alone and
-    dropped the nested scripts/ and references/ the instructions call, so every
-    transform failed with "Cannot find module" while reads kept working. One
-    repo, one checkout, no pin to drift.
+    The skill was bind-mounted :ro from this checkout, and that made it
+    uneditable: every skill_manage write died with EROFS. The agent is meant to
+    improve its own skill, so the home copy -- the same writable store where it
+    keeps skills it authors itself -- is the one it runs; this checkout is only
+    the seed. No compose.override.yml may reappear with a skill mount: a mount
+    at the same target would shadow the seeded copy read-only again.
 
-    Constrained rather than merely present, because agent-mgr asserts its
-    TEMPLATE's volume set and nothing asserts an instance's -- its own fixture
-    shows an override merging in a vault directory. The override lives here, so
-    this is the file that can check it.
+    The runbook has to name the seed's destination. Pinned by VALUE, the way
+    SKILL.md is pinned to HARVEST_EXPRESSION: a scan for sentences about
+    seeding gets out-spelled the first time someone rephrases; a literal that
+    must appear cannot.
     """
-    mounts = yaml.safe_load(
-        (ROOT / "compose.override.yml").read_text()
-    )["services"]["hermes"]["volumes"]
-    assert len(mounts) == 1, f"the override widens the mount set by more than the skill: {mounts}"
-    # rsplit, not split: the source is ${AGENT_DIR:?...}, whose :? default
-    # syntax carries colons of its own.
-    source, target, mode = mounts[0].rsplit(":", 2)
-    # ${AGENT_DIR}, never a relative path: agent-mgr passes its own
-    # templates/compose.yml as the FIRST -f, and Compose resolves relative bind
-    # paths against that file's directory -- so "./" here mounts agent-mgr.
-    # ${AGENT_DIR}/skill, not ${AGENT_DIR}: the mount is the boundary between
-    # this repo and an agent that reads attacker-controlled input, so the
-    # checkout root -- .git, agent.env, config.yaml, tests/, and any stray .env
-    # an operator drops in -- stays outside it.
-    assert source == "${AGENT_DIR:?set by agent-mgr from the registry}/skill", source
-    assert target == "/opt/data/skills/productivity/property-hunt", target
-    assert mode == "ro", "the agent runs these, it does not edit them"
-
-    # And the runbook has to name the same boundary. This moved twice in one
-    # branch -- whole checkout, then skill/ -- and the README described the old
-    # one both times, telling operators a stray root .env reached the container
-    # after it no longer did. Pinned by VALUE, the way SKILL.md is pinned to
-    # HARVEST_EXPRESSION: a scan for sentences about mounting gets out-spelled
-    # the first time someone rephrases; a literal that must appear cannot.
-    subpath = source.split("}", 1)[1]
-    readme = (ROOT / "README.md").read_text()
-    assert f"${{AGENT_DIR}}{subpath}" in readme, (
-        f"the override mounts ${{AGENT_DIR}}{subpath}; the README does not say so"
+    assert not (ROOT / "compose.override.yml").exists(), (
+        "an override is back -- a skill mount would shadow the seeded copy read-only"
+    )
+    hook = ROOT / "deploy-hook"
+    assert hook.is_file(), "agent.env declares deploy-hook; the script is missing"
+    assert hook.stat().st_mode & 0o111, "agent-mgr refuses a non-executable deploy hook"
+    assert "skills/productivity/property-hunt" in (ROOT / "README.md").read_text(), (
+        "the hook seeds skills/productivity/property-hunt; the README does not say so"
     )
 
 
-def test_the_mounted_tree_carries_what_the_instructions_call():
+def test_the_hook_seeds_once_and_never_clobbers_the_agents_copy():
+    """First run copies the full tree; a second run leaves the agent's edits.
+
+    Both halves matter. The full tree, because the skill was once pinned and
+    fetched from a second repo and the installer delivered SKILL.md alone,
+    dropping the scripts/ and references/ the instructions call. Never-clobber,
+    because the home copy is the agent's -- its edits are the point of seeding
+    instead of mounting.
+    """
+    with tempfile.TemporaryDirectory() as home:
+        env = {"AGENT_HOME": home, "PATH": "/usr/bin:/bin"}
+        first = subprocess.run(["./deploy-hook"], cwd=ROOT, env=env, capture_output=True, text=True)
+        assert first.returncode == 0, first.stderr
+        seeded = Path(home) / "skills" / "productivity" / "property-hunt"
+        for needed in ("SKILL.md", "scripts/properties.ts", "scripts/scrape.ts", "references"):
+            assert (seeded / needed).exists(), f"the seed carried no {needed}"
+        (seeded / "SKILL.md").write_text("the agent's edit")
+        second = subprocess.run(["./deploy-hook"], cwd=ROOT, env=env, capture_output=True, text=True)
+        assert second.returncode == 0, second.stderr
+        assert (seeded / "SKILL.md").read_text() == "the agent's edit", (
+            "a redeploy overwrote the agent's copy"
+        )
+        assert "differs" in second.stdout, "drift between seed and home copy went unreported"
+
+
+def test_the_seeded_tree_carries_what_the_instructions_call():
     """SKILL.md's commands are relative to the skill directory, which is skill/."""
     skill_dir = ROOT / "skill"
     text = (skill_dir / "SKILL.md").read_text()
     assert "scripts/properties.ts" in text and "scripts/scrape.ts" in text
     for needed in ("scripts/properties.ts", "scripts/scrape.ts", "references"):
-        assert (skill_dir / needed).exists(), f"the mount would carry no {needed}"
+        assert (skill_dir / needed).exists(), f"the seed would carry no {needed}"
 
 
-def test_the_deployment_half_stays_out_of_the_mount():
+def test_the_deployment_half_stays_out_of_the_seed():
     """What the agent can read is skill/, and these are deliberately not in it.
 
-    The mount, not git, is the boundary: an untracked file in the checkout is
-    invisible to every guard that reads the index but is handed to the container
-    all the same. Keeping the descriptor, the config and the tests at the root
-    means the obvious `cp .env.example .env` lands outside the agent's reach.
+    The hook copies skill/ alone, so the descriptor, the config and the tests
+    stay outside the agent's reach -- the obvious `cp .env.example .env` lands
+    at the root, which is never seeded.
     """
-    for outside in ("agent.env", "config.yaml", ".env.example", "compose.override.yml", "tests"):
-        assert (ROOT / outside).exists(), f"{outside} moved -- is it inside the mount now?"
-        assert not (ROOT / "skill" / outside).exists(), f"{outside} is inside the mounted tree"
+    for outside in ("agent.env", "config.yaml", ".env.example", "deploy-hook", "tests"):
+        assert (ROOT / outside).exists(), f"{outside} moved -- is it inside the seed now?"
+        assert not (ROOT / "skill" / outside).exists(), f"{outside} is inside the seeded tree"

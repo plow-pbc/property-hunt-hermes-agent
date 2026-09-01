@@ -87,12 +87,16 @@ agent-mgr sign-in    property   # one-time browser OAuth for this agent
 agent-mgr agent      property 'which houses have I saved?'   # a turn without the phone
 ```
 
-Register the checkout itself: that row supplies `${AGENT_DIR}`, and the override
-mounts `${AGENT_DIR}/skill` from it. A wrong path is how the container ends up
-with no `skill/scripts/`.
+Register the checkout itself: that row supplies the checkout path, and
+`deploy` runs this repo's `deploy-hook`, which seeds `skill/` into the agent's
+home at `skills/productivity/property-hunt` — copy-if-absent. The home copy is
+the one the agent runs, and it is writable: the agent edits and improves its
+own skill there, the same way it manages skills it authors itself. A later
+deploy never overwrites it; if the checkout and the home copy have drifted the
+hook says so, and re-seeding is deliberate (remove the home copy, deploy again).
 
-**Only `skill/` enters the container.** Everything else here — `agent.env`,
-`config.yaml`, `.env.example`, `tests/`, `.git` — stays outside it. That is
+**Only `skill/` is seeded.** Everything else here — `agent.env`, `config.yaml`,
+`.env.example`, `tests/`, `.git` — stays outside the agent's reach. That is
 deliberate: this agent reads attacker-controlled input by design (a listing
 page's own JSON-LD, a pasted URL, a texted screenshot) while holding a Latch
 credential to your Mac, so what is reachable from its skill directory is worth
@@ -100,7 +104,7 @@ being narrow about.
 
 **Your credentials never live in either place.** They live in
 `~/.hermes-property/.env`. The obvious slip — `cp .env.example .env` — lands at
-the root of this checkout, which is outside the mount, so it stays out of the
+the root of this checkout, which is never seeded, so it stays out of the
 container. Nothing enforces that for a file put inside `skill/` directly; don't.
 
 ### Deploying a change
@@ -116,27 +120,18 @@ messages them at every restart, so agent-mgr prompts `[y/N]` at a
 terminal and refuses non-interactively. `AGENT_TRANSITION_ACK=1` is the non-interactive
 acknowledgement — set it only when the restart is the point, as above.
 
-One recipe for every file here, deliberately. Only `skill/scripts/` and
-`skill/references/` are genuinely live — the agent execs those out of the mount
-each turn. Everything else is read once and held: `skill/SKILL.md` and
-`config.yaml` at gateway start, `agent.env` and `compose.override.yml` when
-Compose renders. A
-`git pull` alone leaves a running agent on the old values with no error, and
-which files that applies to is not worth remembering when the full recipe costs
-a few seconds.
+One recipe for every file here, deliberately: `config.yaml` is read at gateway
+start and `agent.env` when Compose renders, so a `git pull` alone leaves a
+running agent on the old values with no error.
 
-**What the agent is running is the working tree, not `HEAD`.** A bind mount
-serves what is on disk, so a dirty or mid-pull deploy clone serves that, while
-`git rev-parse HEAD` reports something else. Keep `~/services/property-hunt-hermes-agent`
-clean and on `main`; to check what is actually live:
+**A pull does not update a seeded skill.** The agent's home copy is its own —
+that is the point — so a skill change in this repo reaches an existing agent
+only when someone re-seeds deliberately (remove the home copy, deploy again)
+or hands the change to the agent to apply itself. The deploy prints a drift
+notice when the checkout and the home copy differ.
 
-```sh
-git -C ~/services/property-hunt-hermes-agent status --porcelain   # must be empty
-git -C ~/services/property-hunt-hermes-agent rev-parse HEAD
-```
-
-`agent.env` declares no identity on purpose — its one declaration is
-`AGENT_LIVE=1` above; see the comments in it.
+`agent.env` declares no identity on purpose — its declarations are
+`AGENT_LIVE=1` above and `AGENT_DEPLOY_HOOK=deploy-hook`; see the comments in it.
 
 ## Your data
 
