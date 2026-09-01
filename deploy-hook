@@ -5,7 +5,7 @@
 # agent could not edit it: every skill_manage write died with EROFS. The agent
 # is meant to improve its own skill, so the home copy -- the same writable
 # store where it keeps skills it authors itself -- is the one it runs, and this
-# checkout is only the seed. If the destination already exists it is the
+# checkout is only the seed. If the destination exists non-empty it is the
 # agent's, edits and all, and divergence from the seed is normal. To force a
 # re-seed, remove the home copy and deploy again.
 #
