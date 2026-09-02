@@ -5,6 +5,28 @@
 model:
   default: gpt-5.6-sol
   provider: openai-codex
+# On a full-budget timeout the aux client skips the same-provider retry for
+# compression and falls back -- but by default there is nowhere to land, so an
+# oversized session freezes and every turn re-stalls. A sibling agent lost ~30h
+# to that on 2026-08-31 (plow-pbc/life-assistant-hermes-agent#71); this agent
+# runs the same provider and the same image, so it is the same exposure.
+#
+# The model is pinned, not free-form: a ChatGPT-account codex serves only
+# gpt-5.6-sol and gpt-5.5; every other id 400s. Verify a swap by the fallback
+# log lines, never the return value -- the implicit main-model fallback reports
+# success for a model the account actually rejected. gpt-5.5 was confirmed
+# GENUINE against this agent's own auth before landing.
+#
+# Primary gives up first (180s) because reaching the fallback fast is the point;
+# the chain entry keeps 300s since by then it is the only hope left.
+auxiliary:
+  compression:
+    timeout: 180
+    fallback_chain:
+    - provider: openai-codex
+      model: gpt-5.5
+      timeout: 300
+
 mcp_servers:
   # Plow Latch, reached over the Plow relay. This is the whole point of this
   # agent: the browser and the filesystem it works on are the operator's Mac,
