@@ -97,6 +97,15 @@ def test_the_phone_line_is_enabled():
     assert cfg["platforms"]["plow_chat"]["enabled"] is True
 
 
+def test_compression_has_somewhere_to_fall_back_to():
+    """An empty chain is the incident: on a full-budget timeout the aux client
+    skips the same-provider retry and falls back, so with nothing configured an
+    oversized session freezes and every turn re-stalls. Asserts only that a
+    landing spot exists -- the model and timeouts are deployment choices."""
+    cfg = yaml.safe_load((ROOT / "config.yaml").read_text())
+    assert cfg["auxiliary"]["compression"]["fallback_chain"]
+
+
 def test_latch_is_configured_from_the_environment_not_from_git():
     """The credential decides which Mac this agent can drive; it is never in git.
 
