@@ -65,8 +65,9 @@ def test_the_descriptor_claims_no_identity():
     converged on the convention during the move, so the descriptor is now bare
     and nothing here is about a particular person.
 
-    Per-person values that are not identity -- a different Mac, a different
-    model -- go in ~/.hermes-<name>/.env and reach config.yaml as ${VAR}.
+    Per-person values that are not identity -- a different Mac, say -- go in
+    ~/.hermes-<name>/.env and reach config.yaml as ${VAR}. Not the model:
+    config.yaml pins it, and the compression fallback, as literals.
 
     AGENT_LIVE and AGENT_DEPLOY_HOOK are the declarations allowed through:
     both are properties of every instance of this repo, not of a person.
