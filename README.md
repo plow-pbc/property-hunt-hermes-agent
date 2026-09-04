@@ -163,13 +163,15 @@ owns what is in
 [`plow-hermes-agent` README § The repos](https://github.com/plow-pbc/plow-hermes-agent#the-repos);
 read it before a change that touches a neighbour. The test is **who else would
 have to change if this fact changed** — if the answer is a sibling, the change
-belongs there and this repo takes a pin bump.
+belongs there; this repo only follows, by bumping its pin if it holds one.
 
 Not here:
 
 - **Seeding and deploying** — `agent-mgr` owns the mechanism (`lib/fetch-tree`
-  plus `replay_skills()` off a `skills.tsv` manifest). This repo names a hook;
-  it should not carry a second copier.
+  plus `replay_skills()` off a `skills.tsv` manifest). What this repo's
+  `deploy-hook` owns is one policy the replay does not offer: copy the skill
+  in only when the agent's own copy is absent, never over an edited one. The
+  fetch it does to get there is the duplicated part.
 - **Container lifecycle** — the transition prompt, the compose template, the one
   mount: `agent-mgr` again. This repo only *declares* the fact
   (`agent.env` `AGENT_LIVE=1`).
@@ -186,9 +188,10 @@ Examples:
 - Adherence — #16 deleted this repo's own `scripts/confirm-external-user`
   transition guard once the mechanism landed in `agent-mgr#56`, leaving one
   declared line behind: https://github.com/plow-pbc/property-hunt-hermes-agent/pull/16
-- Violation — #21 added a 32-line `deploy-hook` that re-implements agent-mgr's
-  `fetch-tree` + `skills.tsv` seeding, its own comment naming the shape it
-  copies: https://github.com/plow-pbc/property-hunt-hermes-agent/pull/21
+- Drift — #21's `deploy-hook` carries the copy-if-absent policy this agent
+  needs, and with it a second copy of agent-mgr's `fetch-tree` shape, its own
+  comment naming what it copies; the policy is this repo's, the fetch is not:
+  https://github.com/plow-pbc/property-hunt-hermes-agent/pull/21
 
 ## Development
 

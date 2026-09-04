@@ -5,7 +5,10 @@
 # container lifecycle this repo only declares against. plow owns the chat API
 # and the relay every turn crosses; hermes-plow-chat is the plugin that frames
 # those turns and supplies the Plow tools. Peer variants are not listed — a
-# sibling assistant is a repo this one shares no edge with.
+# sibling assistant is a repo this one shares no edge with. plow-hermes-agent
+# is not a build input here but its README map and seed config.yaml are what
+# the gate compares this repo's config keys and persona text against.
 plow-pbc/agent-mgr
 plow-pbc/plow
 plow-pbc/hermes-plow-chat
+plow-pbc/plow-hermes-agent
