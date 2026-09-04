@@ -1,10 +1,11 @@
 # Repos a reviewer of THIS repo may search and cite, materialized under
-# .siblings/<owner>/<repo>. Declared rather than left to the fallback so
-# the set is the one this repo actually depends on.
+# .siblings/<owner>/<repo>. One per line.
 #
-# One per line. The reviewer host must also carry a SOURCE_PATHS entry for
-# each, or the sibling reports as `missing` and is never searched.
-
+# agent-mgr deploys this agent and owns the seeding, config template and
+# container lifecycle this repo only declares against. plow owns the chat API
+# and the relay every turn crosses; hermes-plow-chat is the plugin that frames
+# those turns and supplies the Plow tools. Peer variants are not listed — a
+# sibling assistant is a repo this one shares no edge with.
 plow-pbc/agent-mgr
-plow-pbc/str-hermes-agent
-plow-pbc/life-assistant-hermes-agent
+plow-pbc/plow
+plow-pbc/hermes-plow-chat
