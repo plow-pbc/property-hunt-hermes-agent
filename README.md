@@ -180,7 +180,7 @@ Not here:
   defaults: the base image, `plow-hermes-agent` `image/seed/config.yaml`. Only
   the model and its fallbacks are this repo's reason to exist.
 - **How a turn is framed, the Plow tools, trust and group policy** —
-  `hermes-plow-chat` and `plow`. The Mac-side tools this skill drives are
+  `hermes-plugin-plow` and `plow`. The Mac-side tools this skill drives are
   `latch`'s.
 
 Examples:
